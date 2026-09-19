@@ -1,20 +1,30 @@
 //------------------------------------------------------------------------------
 // The Pocket's memories behind the core's ports (docs/core-design.md section 2).
 //
-//   SDRAM   68000 program   512 KB   word 0x000000   single words, cached
-//           Z80 program      64 KB   word 0x040000   single words, cached
-//           graphics          1 MB   word 0x080000   single words for the line
-//                                                    renderer, 64-word bursts
-//                                                    for the sprite engine
-//   SRAM    tilemap VRAM     64 KB   word 0x00000    single words, byte enables
+//              region          size     image at    SDRAM word
+//   SDRAM   TMS34010 program   256 KB   0x000000    0x000000   131072 words
+//           MC6809E sound      192 KB   0x040000    0x020000    98304 words
+//           graphics           1.5 MB   0x070000    0x100000   786432 words
+//   SRAM    (unassigned)
 //
 // The image arrives from the Pocket as a stream of bytes in the order
 // smashtv.mra builds it, and is written into SDRAM a word at a time through
-// the same controller the core reads it back through.
+// the same controller the core reads it back through.  The bases are powers
+// of two and every region fits inside its own, so the offsets go in with an
+// OR and cost no adder.
 //
-// The graphics ports are 32 bits wide where the SDRAM is 16, so each 32-bit
-// word is two SDRAM words: the line renderer's port reads them one after the
-// other, and the sprite engine's burst of 32 is a 64-word SDRAM burst.
+// The graphics port is 32 bits wide where the SDRAM is 16: one image word is
+// four consecutive pixels (three plane-pair bytes and a pad), so one two-word
+// SDRAM burst feeds four pixels of a blit.
+//
+// PROVISIONAL.  The region bases, sizes and the download path are settled and
+// proved by sim/run_mem.sh.  The *shape* of the client ports is still the
+// template's -- two graphics ports, an SRAM tilemap port -- because the
+// machine that will use them does not exist yet.  The blitter needs a burst
+// write path into a frame buffer that is not yet allocated here, and the
+// sound ROM needs a cache in front of it (docs/hardware.md section 1: the
+// 6809's execution rate is the CVSD's sample rate).  Both arrive with the
+// RTL that needs them; neither changes the image.
 //------------------------------------------------------------------------------
 `default_nettype none
 
@@ -39,13 +49,13 @@ module smashtv_mem (
     input  logic        mrom_req,  input  logic [18:1] mrom_addr,
     output logic        mrom_ack,  output logic [15:0] mrom_q,
 
-    input  logic        srom_req,  input  logic [15:0] srom_addr,
+    input  logic        srom_req,  input  logic [17:0] srom_addr,
     output logic        srom_ack,  output logic  [7:0] srom_q,
 
-    input  logic        gfxl_req,  input  logic [17:0] gfxl_addr,
+    input  logic        gfxl_req,  input  logic [18:0] gfxl_addr,
     output logic        gfxl_ack,  output logic [31:0] gfxl_q,
 
-    input  logic        gfxs_req,  input  logic [17:0] gfxs_addr,
+    input  logic        gfxs_req,  input  logic [18:0] gfxs_addr,
     output logic        gfxs_ack,  output logic [31:0] gfxs_q,
 
     input  logic        vram_req,  input  logic        vram_we,
@@ -66,15 +76,15 @@ module smashtv_mem (
     inout  wire  [15:0] sram_dq,
     output logic        sram_oe_n, sram_we_n, sram_ub_n, sram_lb_n
 );
-    // Where each region starts, as an SDRAM word address.  The bases are
-    // powers of two and every region fits inside its own, so the offsets go
-    // in with an OR and cost no adder.
-    localparam logic [24:1] PROG_W = 24'h000000;
-    localparam logic [24:1] SND_W  = 24'h040000;
-    localparam logic [24:1] GFX_W  = 24'h080000;
-    // and where each starts in the image, as a byte offset
-    localparam logic [24:0] SND_B  = 25'h080000;
-    localparam logic [24:0] GFX_B  = 25'h090000;
+    // Where each region starts, as an SDRAM word address, and where it starts
+    // in the image, as a byte offset.  Both are in smashtv.mra's comment and
+    // in sim/tb_mem.cpp, and tools/verify_rom.py checks the image against
+    // MAME; change one and all four have to change together.
+    localparam logic [24:1] PROG_W = 24'h000000;   // 0x00000..0x1FFFF
+    localparam logic [24:1] SND_W  = 24'h020000;   // 0x20000..0x37FFF
+    localparam logic [24:1] GFX_W  = 24'h100000;   // 0x100000..0x1BFFFF
+    localparam logic [24:0] SND_B  = 25'h040000;
+    localparam logic [24:0] GFX_B  = 25'h070000;
 
     // ------------------------------------------------------------ download
     // A byte at a time from the Pocket, paired into a 16-bit word because the
@@ -169,8 +179,8 @@ module smashtv_mem (
         if (c_ack[2]) mrom_q <= rdata;
     end
 
-    // the Z80 reads bytes; the SDRAM holds them two to a word, high byte first
-    assign c_addr[3]  = SND_W | {9'd0, srom_addr[15:1]};
+    // the 6809 reads bytes; the SDRAM holds them two to a word, high byte first
+    assign c_addr[3]  = SND_W | {7'd0, srom_addr[17:1]};
     assign c_req[3]   = srom_req && !srom_ack;
     assign c_we[3]    = 1'b0;
     assign c_wdata[3] = 16'd0;
@@ -208,7 +218,7 @@ module smashtv_mem (
     end
 
     wire        b_req_m  = (bown == B_SPR) ? gfxs_req : (bown == B_LINE);
-    wire [24:1] b_addr_m = GFX_W | {5'd0, ((bown == B_LINE) ? gfxl_addr : gfxs_addr), 1'b0};
+    wire [24:1] b_addr_m = GFX_W | {4'd0, ((bown == B_LINE) ? gfxl_addr : gfxs_addr), 1'b0};
     wire  [9:0] b_len_m  = (bown == B_LINE) ? 10'd2 : 10'd64;
 
     always_ff @(posedge clk) begin

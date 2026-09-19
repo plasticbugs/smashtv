@@ -27,7 +27,7 @@
 static Vtb_mem_top *dut;
 static void tick() { dut->clk = 0; dut->eval(); dut->clk = 1; dut->eval(); }
 
-static const uint32_t SND_B = 0x080000, GFX_B = 0x090000, IMG = 0x190000;
+static const uint32_t SND_B = 0x040000, GFX_B = 0x070000, IMG = 0x1F0000;
 static const uint32_t PROG_WORDS = SND_B / 2, SND_BYTES = GFX_B - SND_B, GFX_WORDS = (IMG - GFX_B) / 4;
 
 static std::vector<uint8_t> rom;

@@ -886,9 +886,9 @@ module core_top
 
     // the core's memory ports
     wire        mrom_req, mrom_ack;  wire [18:1] mrom_addr;  wire [15:0] mrom_q;
-    wire        srom_req, srom_ack;  wire [15:0] srom_addr;  wire  [7:0] srom_q;
-    wire        gfxl_req, gfxl_ack;  wire [17:0] gfxl_addr;  wire [31:0] gfxl_q;
-    wire        gfxs_req, gfxs_ack;  wire [17:0] gfxs_addr;  wire [31:0] gfxs_q;
+    wire        srom_req, srom_ack;  wire [17:0] srom_addr;  wire  [7:0] srom_q;
+    wire        gfxl_req, gfxl_ack;  wire [18:0] gfxl_addr;  wire [31:0] gfxl_q;
+    wire        gfxs_req, gfxs_ack;  wire [18:0] gfxs_addr;  wire [31:0] gfxs_q;
     wire        vram_req, vram_we, vram_ack;
     wire [14:0] vram_addr;  wire [15:0] vram_din, vram_q;  wire [1:0] vram_ben;
 

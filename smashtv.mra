@@ -3,25 +3,78 @@
         The ROM recipe.  tools/mra_build.py reads this and your MAME romset and
         writes smashtv.rom; any standard MRA tool does the same.
 
-        One <part> per ROM file, in image order.  Interleaved ROMs go inside an
-        <interleave output="16"> (or 32): each `map` digit is one byte of the
-        output word, left to right, and its value is the 1-based byte of THIS
-        part that lands there, 0 for none.  So two byte-wide ROMs making
-        big-endian 16-bit words are map="10" (this part is the first byte) and
-        map="01".  Check the result against the bytes MAME hands the CPU with
-        tools/verify_rom.py; do not reason about it.  METHODOLOGY section 5.7.
+        The image is three regions, in this order.  The layout must match
+        target/pocket/smashtv_mem.sv and sim/tb_mem.cpp:
 
-        The image layout must match target/pocket/smashtv_mem.sv and
-        sim/tb_mem.cpp.
+          0x000000  262144  program   two 128 KB EPROMs interleaved into
+                                      16-bit words, u89 the high byte.
+                                      MAME's "maindata" region is 16-bit
+                                      little-endian with u105 on the even
+                                      byte, so the CPU word is (u89<<8)|u105.
+          0x040000  196608  sound     U4, U19, U20 end to end, 64 KB each.
+                                      The 6809's bank register selects them
+                                      with bits 1-0 and the 32 KB half with
+                                      bit 2, so the byte address is
+                                      {sel[1:0], half, a[14:0]}.  Bank 3 is
+                                      not connected on the board and is not
+                                      in the image: the core returns 0 for it,
+                                      which is what MAME's zero-filled region
+                                      does.
+          0x070000 1572864  graphics  three plane-pairs interleaved into
+                                      32-bit words, so one aligned 32-bit read
+                                      is four consecutive pixels.  MAME's
+                                      init_gfxrom(6) takes two bits of pixel p
+                                      from byte p/4 of each of three 2 MB
+                                      chunks; here byte 0 of each word is the
+                                      chunk-0 byte, byte 1 the chunk-1 byte,
+                                      byte 2 the chunk-2 byte, byte 3 unused.
+                                      Pixel p = word (p>>2), field 2*(p&3):
+                                        {c2[1:0], c1[1:0], c0[1:0]}
+          0x1F0000 = 2,031,616 bytes total.
+
+        tools/verify_rom.py proves every region byte-identical to what MAME
+        hands the chips; it is the check, not the reasoning above.
+
+        The romset is often distributed with the pre-0.240 short names
+        (la1.u95, u89-la8).  The names here are MAME 0.288's; the CRCs are
+        what actually identifies each file, and tools/shadow_romset.sh maps
+        the short names for MAME itself.
     -->
-    <name>Smash TV</name>
+    <name>Smash T.V.</name>
     <setname>smashtv</setname>
     <rbf>smashtv</rbf>
-    <mameversion>0000</mameversion>
-    <year>1980</year>
-    <manufacturer>MANUFACTURER</manufacturer>
+    <mameversion>0288</mameversion>
+    <year>1990</year>
+    <manufacturer>Williams</manufacturer>
     <switches default="ff,ff"/>
-    <rom index="0" zip="smashtv.zip" md5="none">
-        <!-- <part name="prog0.bin" crc="00000000"/> -->
+    <rom index="0" zip="smashtv.zip" md5="faac921545f4ea871a236abfdde31dd6">
+
+        <!-- 0x000000: TMS34010 program, 256 KB -->
+        <interleave output="16">
+            <part name="la8_smash_tv_game_rom_u89.u89"   crc="8e7fe463" map="10"/>
+            <part name="la8_smash_tv_game_rom_u105.u105" crc="48cd793f" map="01"/>
+        </interleave>
+
+        <!-- 0x040000: MC6809E sound board, 192 KB, U4 then U19 then U20 -->
+        <part name="sl2_smash_tv_sound_rom_u4.u4"   crc="29d3f6c8"/>
+        <part name="sl2_smash_tv_sound_rom_u19.u19" crc="ac5a402a"/>
+        <part name="sl2_smash_tv_sound_rom_u20.u20" crc="875c66d9"/>
+
+        <!-- 0x070000: graphics, 1.5 MB, three plane-pairs to a 32-bit word -->
+        <interleave output="32">
+            <part name="la1_smash_tv_game_rom_u111.u111" crc="72f0ba84" map="1000"/>
+            <part name="la1_smash_tv_game_rom_u95.u95"   crc="e864a44b" map="0100"/>
+            <part name="la1_smash_tv_game_rom_u106.u106" crc="5c718361" map="0010"/>
+        </interleave>
+        <interleave output="32">
+            <part name="la1_smash_tv_game_rom_u112.u112" crc="436f0283" map="1000"/>
+            <part name="la1_smash_tv_game_rom_u96.u96"   crc="15555ea7" map="0100"/>
+            <part name="la1_smash_tv_game_rom_u107.u107" crc="0fba1e36" map="0010"/>
+        </interleave>
+        <interleave output="32">
+            <part name="la1_smash_tv_game_rom_u113.u113" crc="4a4b8110" map="1000"/>
+            <part name="la1_smash_tv_game_rom_u97.u97"   crc="ccac9d9e" map="0100"/>
+            <part name="la1_smash_tv_game_rom_u108.u108" crc="cb0a092f" map="0010"/>
+        </interleave>
     </rom>
 </misterromdescription>
