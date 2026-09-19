@@ -8,7 +8,7 @@ of its own.
 ## What it is
 
 Not a blank scaffold: a **core that already works**, with no game in it.
-`rtl/mycore_core.sv` draws a crosshatch and colour bars, moves a cursor with
+`rtl/smashtv_core.sv` draws a crosshatch and colour bars, moves a cursor with
 the d-pad, beeps on button 1, and reads one word from each ROM region; around
 it is the platform glue, memory subsystem, bring-up panel, benches, CI and
 release tooling that the sibling cores run on hardware. The first thing a new
@@ -25,7 +25,7 @@ CPU to blame.
 | the gate has teeth | the same bench **fails** the pre-fix memory module that blacked out Master of Weapon's first hardware run (333 wrong words of 14,000 sampled, right low byte under wrong high byte) |
 | Quartus 18.1 full compile | succeeds; no negative slack in any corner; no ignored constraints |
 | `tools/init_core.py` | a stamped copy lints, passes the gate and synthesises |
-| **on a Pocket** | **the skeleton itself has not been run.** Everything around `mycore_core.sv` is the code Master of Weapon v0.1.1 runs on hardware; the skeleton's own raster and pattern are new and unflashed. Flash it first and fix this line. |
+| **on a Pocket** | **the skeleton itself has not been run.** Everything around `smashtv_core.sv` is the code Master of Weapon v0.1.1 runs on hardware; the skeleton's own raster and pattern are new and unflashed. Flash it first and fix this line. |
 
 ## Start here
 
@@ -67,5 +67,5 @@ and is already in place.
 
 `CLAUDE.md` has the map. The stubs to fill in are `README.md`,
 `docs/hardware.md`, `docs/core-design.md`, `docs/bringup.md`,
-`modules/VENDOR.md` and `mycore.mra`. `tools/examples/` holds four
+`modules/VENDOR.md` and `smashtv.mra`. `tools/examples/` holds four
 game-specific tools from Master of Weapon, kept as patterns.

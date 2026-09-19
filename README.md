@@ -1,11 +1,11 @@
-# My Core — Analogue Pocket core (openFPGA)
+# Smash TV — Analogue Pocket core (openFPGA)
 
 > **This is the template.** Run `tools/init_core.py <shortname> "<Title>"`,
 > then replace this block with two sentences: the game, the maker, the year,
 > the board, and what is in the gateware. `CLAUDE.md` says what to do next.
 
 > **ROMs are not included and never will be.** You supply your own MAME
-> `mycore` romset; the core reads one image built from it.
+> `smashtv` romset; the core reads one image built from it.
 
 | board part | implementation | verified by |
 |---|---|---|
@@ -13,7 +13,7 @@
 | *sound CPU* | | |
 | *sound chip* | | *band energy against MAME's recording, over what window* |
 | *video chip* | `rtl/…` | *pixel-identical to MAME on N frozen states* |
-| *ROM* | Pocket SDRAM (`target/pocket/mycore_mem.sv`) | `sim/run_mem.sh`; image byte-identical to MAME's regions |
+| *ROM* | Pocket SDRAM (`target/pocket/smashtv_mem.sv`) | `sim/run_mem.sh`; image byte-identical to MAME's regions |
 | *tilemap RAM* | Pocket SRAM | self-test at reset |
 
 One row per part of the board. The right-hand column is the point of the
@@ -29,12 +29,12 @@ needs the second and third more than the first.
 ## Building the ROM image
 
 ```sh
-python3 mra_build.py mycore.mra mycore.zip
+python3 mra_build.py smashtv.mra smashtv.zip
 ```
 
 The builder needs only Python 3. It reads the MAME zip (or a directory of loose
 files), checks every ROM's CRC32, and verifies the finished image against a
-known md5. Copy the result to `Assets/mycore/common/mycore.rom` on the SD card.
+known md5. Copy the result to `Assets/smashtv/common/smashtv.rom` on the SD card.
 
 ## Building the core
 

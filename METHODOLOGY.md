@@ -8,7 +8,7 @@ once; the sections marked **cost me time** are the ones worth reading twice.
 after the Pleiads / Phoenix core (Amstar, 8085, discrete sound), which was
 built from this document. They are the things it did not yet say.
 
-§5.16 onward, marked *(My Core)*, were added after the Master of
+§5.16 onward, marked *(Smash TV)*, were added after the Master of
 Weapon core (Taito B System: 68000, Z80, YM2203, TC0180VCU), built from this
 document in turn. Its simulation was green for days before it met a Pocket, and
 its first four hardware runs found four faults no bench had shown. Those
@@ -286,16 +286,16 @@ and 171,930 bytes, which is a quick check that a file is what it claims to be;
 decode it to a PNG and look at it before shipping it.
 
 **The aspect ratio in `video.json` describes the raster before the scaler
-rotates it** *(My Core; Time Pilot found it first)*. With a `rotation`
+rotates it** *(Smash TV; Time Pilot found it first)*. With a `rotation`
 of 90 or 270 the shape that reaches the panel is `aspect_h:aspect_w`. A vertical
 game written the intuitive way round, `3:4`, comes out landscape. A mode that
 fills the Pocket's 10:9 panel is written `9:10`.
 
-**Do not list the d-pad in `input.json`** *(My Core)*. The Pocket's
+**Do not list the d-pad in `input.json`** *(Smash TV)*. The Pocket's
 controls menu showed "Up" and three blank rows. The core reads the pad from
 `cont1_key` whether or not it is listed; list only what is worth remapping.
 
-**`pause_core` is not a reset** *(My Core and Cadash)*. It is the
+**`pause_core` is not a reset** *(Smash TV and Cadash)*. It is the
 Pocket's menu being open. ORed into the core's reset it holds the board in
 reset for as long as the menu is up and boots the game from scratch when it
 closes. Freeze the clock-enable divider instead and mask the CPU and sound
@@ -305,13 +305,13 @@ running and the picture stays up behind the menu. Note what else counts
 wall-clock time while the CPU is stopped — a watchdog will expire.
 
 **Every menu entry is a claim that the gateware does something**
-*(My Core)*. The DIP bank was transcribed whole from MAME, including
+*(Smash TV)*. The DIP bank was transcribed whole from MAME, including
 Cabinet and Flip Screen, which on this board both come down to a video-chip
 bit the core never implemented. Toggle each entry on hardware once and watch
 for its effect; remove what has none, or what has one nobody holding a Pocket
 wants.
 
-**Copying to the SD card from macOS** *(My Core)*: use `cp -X` with
+**Copying to the SD card from macOS** *(Smash TV)*: use `cp -X` with
 `COPYFILE_DISABLE=1`, or the card fills with `._*` AppleDouble files. If you
 clean them up afterwards, name the files; a `find -delete` aimed at
 `Platforms/` sweeps every other core's as well.
@@ -339,14 +339,14 @@ infer byte enables in Quartus and explode into registers. Use 2D-packed
   depth, and it swallowed the package's asset folder and both directories of
   captured reference states. CI failed or skipped for the project's first ten
   pushes as a result. Write `/pleiads/` and `/*.bin`.
-- *(My Core)* **A rebuild is never byte-identical, even when the fit
+- *(Smash TV)* **A rebuild is never byte-identical, even when the fit
   is.** The same container and the same source gave the same slack to three
   decimals on my machine and in CI, every time — and a different bitstream,
   because the framework stamps the date, the time and a random id into
   `build_id.mif` on every compile. So "CI rebuilt it and timing passed" is a
   twin of the binary you tested, not that binary. I released twins twice here;
   the first bullet of this section is still the right rule.
-- *(My Core)* **Because the fit is deterministic, never push to find
+- *(Smash TV)* **Because the fit is deterministic, never push to find
   out whether timing closed.** A local compile answers the same question with
   the same numbers, and can be interrogated with `quartus_sta` afterwards.
   Eleven CI runs were spent learning what local builds would have said.
@@ -562,7 +562,7 @@ impressions. "No intro tune, silent, then just beeps" is not "the audio is
 bad"; it names which generator is absent and which is present. §8 item 9 says
 to believe the report. Also *parse* it.
 
-### 5.16 The platform's memory glue is part of the machine, and needs its own bench *(My Core)*
+### 5.16 The platform's memory glue is part of the machine, and needs its own bench *(Smash TV)*
 
 **Cost me the first hardware run, and would have cost a week without a sibling
 core to diff against.** The whole-machine bench answered the CPUs from plain
@@ -598,7 +598,7 @@ What generalises:
   memory module before its download fix. When you fix something in a file that
   was copied, grep the siblings for the same line the same day.
 
-### 5.17 A shared port's acknowledge must say whose it is *(My Core)*
+### 5.17 A shared port's acknowledge must say whose it is *(Smash TV)*
 
 Tilemap RAM was one SRAM port shared by the 68000 and the line renderer. The
 port answered with a single ack pulse, decided the clock *before* it was
@@ -624,7 +624,7 @@ the whole diagnosis — it said "caused by CPU activity" in one sentence.
 - **"It stops when X is paused" is a bisection.** Give the user a way to freeze
   half the machine (the menu pause does it for free) and ask what changes.
 
-### 5.18 Prefer structures that can only be synthesised one way *(My Core)*
+### 5.18 Prefer structures that can only be synthesised one way *(Smash TV)*
 
 The two line buffers were `logic [11:0] linebuf [0:1][0:319]` — a
 two-dimensional, non-power-of-two array, which became 7,000 flops, a 640-way
@@ -651,7 +651,7 @@ I never proved why. The replacement was one 1024-entry RAM addressed
   the white bar's pixels standing as comb teeth in cells the bar never touches.
   Ask for the test pattern first.
 
-### 5.19 An instrument must survive the event it measures *(My Core)*
+### 5.19 An instrument must survive the event it measures *(Smash TV)*
 
 The line renderer reported how many clocks its slowest line took. It restarted
 at every line start whether or not it had finished — and the restart reset the
@@ -668,7 +668,7 @@ on another day. I built a theory on those two numbers and a fix on the theory.
   *ask what the instrument does at the moment of the failure it is there to
   catch.*
 
-### 5.20 Interface timing is a balance, and the report you did not read is the one that matters *(My Core)*
+### 5.20 Interface timing is a balance, and the report you did not read is the one that matters *(Smash TV)*
 
 CI failed eleven times on setup slack. I spent most of them pipelining
 arithmetic in the sprite engine, because that is where the failing paths had
@@ -699,7 +699,7 @@ for days.
   the build. It is the converse of §5.11: there, the constraint covered more
   than you meant; here, it covered nothing.
 
-### 5.21 A bring-up panel, designed to be read by a person *(My Core)*
+### 5.21 A bring-up panel, designed to be read by a person *(Smash TV)*
 
 §8 item 7 says to add the overlay early. This is what it needed once someone
 was reading it to me square by square, off a picture the scaler had rotated.
@@ -730,7 +730,7 @@ was reading it to me square by square, off a picture the scaler had rotated.
   "the CPU is not halted" into "the CPU dies within three kicks of boot".
 - Leave all of it in the gateware for release, and take it off the menu.
 
-### 5.22 When the fix changes nothing, the theory is dead — say so *(My Core)*
+### 5.22 When the fix changes nothing, the theory is dead — say so *(Smash TV)*
 
 I fixed the striped picture twice before I fixed it. The first fix (fetch
 graphics in bursts, so lines finish in time) was well reasoned, verified in
@@ -865,7 +865,7 @@ Added after Pleiads / Phoenix:
 17. Publish the simulator's output where the user can hear it next to the
     hardware. It bisects.
 
-Added after My Core:
+Added after Smash TV:
 
 18. Build the second whole-machine bench — real memory glue, behavioural
     chips, the image pushed at the loader's real rate — before the first

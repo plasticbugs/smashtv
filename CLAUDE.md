@@ -4,7 +4,7 @@ You are building an openFPGA core for one arcade board. This repository starts
 as a **working skeleton**: it compiles, closes timing, passes its memory gate,
 and on a Pocket shows a test pattern with a cursor on the d-pad, a beep on
 button 1 and a bring-up panel. Your job is to replace the inside of
-`rtl/mycore_core.sv` with the machine, without ever breaking what already
+`rtl/smashtv_core.sv` with the machine, without ever breaking what already
 works around it.
 
 `METHODOLOGY.md` is the long form of everything below, written from five cores
@@ -33,11 +33,11 @@ until it is checked, and commit at each one.
    clocks, the video chip's registers and draw order, the sound board. Use
    Ghidra on the program ROM for anything the driver leaves implicit. No RTL
    yet.
-3. **The ROM image.** Write `mycore.mra`, build the image with
+3. **The ROM image.** Write `smashtv.mra`, build the image with
    `tools/mra_build.py`, and write a `tools/verify_rom.py` (the pattern is in
    `tools/examples/`) that proves every region is byte-identical to what MAME
    hands the chips. Set the region bases in
-   `target/pocket/mycore_mem.sv` and `sim/tb_mem.cpp` to match, and run
+   `target/pocket/smashtv_mem.sv` and `sim/tb_mem.cpp` to match, and run
    `sim/run_mem.sh`.
 4. **The reference renderer** (`tools/`), pixel-identical to MAME on captured
    frames that span boot, attract, gameplay and any special mode. Expect to get
@@ -47,7 +47,7 @@ until it is checked, and commit at each one.
    measure the line and sprite budgets against a real memory latency.
 6. **CPUs, then the whole machine** on the fast bench with ideal memories.
 7. **The whole machine on the real memory glue** (`sim/run_pocket.sh` in the
-   Master of Weapon core is the model): real `mycore_mem`, real SDRAM
+   Master of Weapon core is the model): real `smashtv_mem`, real SDRAM
    controller, behavioural chips, image pushed at the loader's rate. Do this
    *before the first flash*.
 8. **Sound**, compared with a MAME recording by band energy over a whole
@@ -86,7 +86,7 @@ until it is checked, and commit at each one.
 
 | Trap | Where it is handled | Section |
 |---|---|---|
-| The Pocket's loader cannot wait; a single pending download word corrupts the image | 64-word FIFO, edge-detected strobe, in `mycore_mem.sv`; `sim/run_mem.sh` fails without it | 5.16 |
+| The Pocket's loader cannot wait; a single pending download word corrupts the image | 64-word FIFO, edge-detected strobe, in `smashtv_mem.sv`; `sim/run_mem.sh` fails without it | 5.16 |
 | The write strobe is held 4 clocks; anything that counts on its level is wrong | the gate's `-hold` | 5.8 |
 | A shared port's ack carries no name | route by who held the mux the clock before (see Master of Weapon's `tc0180vcu.sv` arbiter) | 5.17 |
 | 2-D or non-power-of-two arrays of flops | one-dimensional, power-of-two RAMs only | 5.18 |
@@ -106,12 +106,12 @@ docs/hardware.md                        the board, from MAME and the ROM — wri
 docs/core-design.md                     how it maps onto the Pocket, and the budgets
 docs/bringup.md                         what to do and read at the first flash
 ref/mame/                               MAME sources this was written against, verbatim
-rtl/mycore_core.sv                      THE MACHINE.  skeleton now; ports are the contract
+rtl/smashtv_core.sv                      THE MACHINE.  skeleton now; ports are the contract
 rtl/clk_enables.sv                      CPU/sound/dot enables, with pause and pix_sync
 rtl/dbg_overlay.sv  rtl/dbg_fault.sv    the bring-up panel and the first-fault capture
 modules/                                vendored CPUs and sound chips; VENDOR.md says from where
 target/pocket/core_top.sv               APF glue; game-specific only below "@ The game"
-target/pocket/mycore_mem.sv             SDRAM clients, download FIFO, burst arbiter, SRAM
+target/pocket/smashtv_mem.sv             SDRAM clients, download FIFO, burst arbiter, SRAM
 target/pocket/sdram_ctrl.sv sram_port.sv   proven on hardware; do not edit casually
 projects/                               Quartus project, SDC, report_worst.tcl
 platform/pocket/                        the opengateware framework — shared, leave alone
@@ -129,7 +129,7 @@ build-local.sh  package-pocket.py       Quartus 18.1 in Docker; the SD-card pack
 ```sh
 tools/init_core.py galaga "Galaga" plasticbugs   # once
 sim/lint.sh                  # seconds; before every commit
-sim/run_mem.sh -quick        # a minute; after touching mycore_mem.sv (drop -quick before a flash)
+sim/run_mem.sh -quick        # a minute; after touching smashtv_mem.sv (drop -quick before a flash)
 ./build-local.sh map         # two minutes; catches what Verilator cannot
 ./build-local.sh compile     # 10-25 minutes; then read projects/output_files/*.sta.summary
 docker run --rm --platform linux/amd64 -v "$PWD":/build -w /build \

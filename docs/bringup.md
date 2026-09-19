@@ -14,7 +14,7 @@ someone decodes squares off a screen.
 ## On the card
 
 `release/pocket/` onto the card root, with `cp -X` from macOS. The ROM image
-goes in `Assets/mycore/common/mycore.rom`. Verify the bitstream's md5 on the
+goes in `Assets/smashtv/common/smashtv.rom`. Verify the bitstream's md5 on the
 card.
 
 ## The skeleton, before there is a game
