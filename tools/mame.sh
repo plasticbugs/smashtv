@@ -7,4 +7,5 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 exec mame smashtv -rompath "$root/.mame/roms" \
     -video none -sound none -nothrottle -skip_gameinfo \
     -cfg_directory "$root/.mame/cfg" -nvram_directory "$root/.mame/nvram" \
+    -snapshot_directory "$root/.mame/snap" \
     "$@"
