@@ -18,7 +18,7 @@ verilator --cc --exe --build -j "${JOBS:-8}" -O3 \
     -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
     -Wno-TIMESCALEMOD -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-SYNCASYNCNET \
     "$WAIVERS" --top-module tb_pocket_top -Mdir obj_pocket ${VID_DIV:+-GVID_DIV=$VID_DIV} \
-    ../rtl/smashtv_core.sv ../rtl/clk_enables.sv ../rtl/stv_main.sv ../rtl/tms34010.sv \
+    ../rtl/smashtv_core.sv ../rtl/stv_pad.sv ../rtl/clk_enables.sv ../rtl/stv_main.sv ../rtl/tms34010.sv \
     ../rtl/stv_video.sv ../rtl/stv_vram.sv ../rtl/stv_blit.sv \
     ../rtl/stv_sound.sv ../rtl/pia6821.sv ../rtl/hc55516.sv \
     ../modules/cpu-mc6809/*.v ../modules/sound-jt51/*.v \

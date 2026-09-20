@@ -67,6 +67,9 @@ int main(int argc, char **argv) {
     uint32_t cyc0 = 0; long clk0 = 0;
     long acc = 0;
     FILE *sndlog = fopen((out + "/snd_cmd.txt").c_str(), "w");
+    // LINESHAPE=1: the width of every line's DE as the Pocket samples it
+    const bool lineshape = getenv("LINESHAPE") != nullptr;
+    long widths[1024] = {0}, pwidths[1024] = {0}; int px = 0; bool was_pde = false; long edge_lit = 0;
     long dense0 = -1, dense1 = -1;
     if (const char *d = getenv("DENSE")) sscanf(d, "%ld %ld", &dense0, &dense1);
 
@@ -85,11 +88,15 @@ int main(int argc, char **argv) {
         }
         if (dut->dbg_unimpl) { printf("STOP  unimplemented instruction near PC %08x, frame %ld\n", dut->dbg_pc, frame); break; }
         if (!dut->dot_ce) continue;
+        if (lineshape) {
+            if (dut->de_pad) { if ((px == 0 || px == 411) && dut->rgb_pad) edge_lit++; px++; was_pde = true; }
+            else if (was_pde) { if (frame > 5 && px < 1024) pwidths[px]++; px = 0; was_pde = false; }
+        }
         if (dut->de) {
             if (x < 1024 && y < 512) { uint8_t *p = &fb[(y*1024 + x)*3]; uint32_t c = dut->rgb;
                 p[0] = c >> 16; p[1] = c >> 8; p[2] = c; }
             x++; was_de = true;
-        } else if (was_de) { if (x > maxx) maxx = x; x = 0; y++; was_de = false; }
+        } else if (was_de) { if (lineshape && frame > 5 && x < 1024) widths[x]++; if (x > maxx) maxx = x; x = 0; y++; was_de = false; }
         if (dut->vblank && !was_vb) {
             frame++;
             // The same script of inputs every MAME capture in this tree uses,
@@ -143,6 +150,8 @@ int main(int argc, char **argv) {
         fwrite(pcm.data(), 2, pcm.size(), f);
         fclose(f);
     }
+    if (lineshape) { printf("DE width of every line after frame 5, as the Pocket samples it:\n"); for (int i = 0; i < 1024; i++) if (widths[i]) printf("  %d dots: %ld lines\n", i, widths[i]); }
+    if (lineshape) { printf("and after the padding, as the Pocket gets it:\n"); for (int i = 0; i < 1024; i++) if (pwidths[i]) printf("  %d dots: %ld lines\n", i, pwidths[i]); printf("  border dots that were not black: %ld\n", edge_lit); }
     dut->final();
     delete dut;
     return 0;

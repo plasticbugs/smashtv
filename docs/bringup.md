@@ -9,7 +9,7 @@ someone decodes squares off a screen.
 - The whole-machine bench on the real memory glue boots.
 - `./build-local.sh compile`: no negative slack in any corner
   (`projects/output_files/*.sta.summary`), no ignored constraints. The build
-  The current build does: bitstream md5 `c4d302488e0eeeb60fedc8452adc1cec`.
+  The current build does: bitstream md5 `a15ab9fde2f7f1d82ff5104726e1b40a`.
 - The ROM image's md5 matches the MRA's.
 
 ## On the card
@@ -95,8 +95,24 @@ chip, and main RAM and the CMOS are landing on top of each other.
   clock was still the template's 96/14 MHz while the core makes a dot every 12
   clocks - my error; I had written "8 MHz" into the comments and never into
   the PLL.  `VID_DIV=14 sim/run_pocket.sh` reproduces the static
-  (`artifacts/pocket/hardware_fault/`).  Fixed in build `c4d30248...`; not yet
-  seen on hardware.
+  (`artifacts/pocket/hardware_fault/`).  Fixed in build `c4d30248...`.
+- 2026-09-20, build `c4d30248...`: **boots and runs; every picture has its
+  columns scrambled, the same everywhere, standing still** - the boot text,
+  the ROM-check board map, attract, play, the test menu.  Rows and colours
+  right.  Measured from the photograph of the DIAGNOSTIC TESTS banner against
+  the bench's render of the same banner under five candidate permutations
+  (`artifacts/pocket/hardware_fault/banner_under_candidate_permutations.png`,
+  rows: original, reverse-8, reverse-4, halves 2-3-0-1, pairs 1-0-3-2,
+  reverse-16): it is **2-3-0-1, the halves of every four-dot group exchanged,
+  aligned to the screen**.  Not in any simulation, including the bench that
+  samples as the Pocket does; the RAMs are built as written.  THEORY, with one
+  line of evidence: the Pocket's scaler wants a width that is a multiple of
+  four - this picture is 410 and all sixteen other cores checked are multiples
+  of four.  Build `a15ab9fd...` hands it over 412 wide (`rtl/stv_pad.sv`, one
+  black dot each side; video.json 412).  Predicted: text reads correctly, with
+  a black column at each edge.  If it is unchanged the theory is dead; next
+  would be the line's TOTAL length, 506 dots, which is also 2 more than a
+  multiple of four.
 
 Date, build md5, what was seen, what it ruled out. One line each. The theories
 that died belong here as much as the one that lived.

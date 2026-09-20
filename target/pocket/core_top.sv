@@ -1084,10 +1084,19 @@ module core_top
         sram_rd0, sram_rd1
     };
 
+    //! The picture goes to the Pocket 412 wide, not 410 (rtl/stv_pad.sv).
+    wire [23:0] p_rgb;
+    wire        p_de, p_hs, p_vs, p_hb, p_vb;
+    stv_pad u_pad (
+        .clk(clk_sys), .cen_dot(g_pix_ce),
+        .rgb_i(g_rgb), .de_i(g_de), .hs_i(g_hs), .vs_i(g_vs), .hb_i(g_hb), .vb_i(g_vb),
+        .rgb_o(p_rgb), .de_o(p_de), .hs_o(p_hs), .vs_o(p_vs), .hb_o(p_hb), .vb_o(p_vb)
+    );
+
     wire [7:0] ovl_r, ovl_g, ovl_b;
     dbg_overlay ovl (
-        .clk(clk_sys), .cen_pix(g_pix_ce), .enable(ovl_en), .de(g_de), .vsync(g_vs),
-        .r_in(g_rgb[23:16]), .g_in(g_rgb[15:8]), .b_in(g_rgb[7:0]),
+        .clk(clk_sys), .cen_pix(g_pix_ce), .enable(ovl_en), .de(p_de), .vsync(p_vs),
+        .r_in(p_rgb[23:16]), .g_in(p_rgb[15:8]), .b_in(p_rgb[7:0]),
         .status(ovl_status), .r_out(ovl_r), .g_out(ovl_g), .b_out(ovl_b)
     );
 
@@ -1101,7 +1110,7 @@ module core_top
     reg       vhs_q, vvs_q, vde_q;
     always @(posedge clk_vid) begin
         vr_q  <= ovl_r; vg_q <= ovl_g; vb_q <= ovl_b;
-        vhs_q <= g_hs; vvs_q <= g_vs; vde_q <= g_de;
+        vhs_q <= p_hs; vvs_q <= p_vs; vde_q <= p_de;
     end
     assign core_r  = vr_q;
     assign core_g  = vg_q;

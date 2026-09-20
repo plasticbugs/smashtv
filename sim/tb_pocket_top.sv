@@ -25,6 +25,8 @@ module tb_pocket_top #(
     input  logic        pause,
     output logic [23:0] rgb,
     output logic        de, dot_ce, vblank,
+    output logic        de_pad,           // the enable as the Pocket gets it, after rtl/stv_pad.sv
+    output logic [23:0] rgb_pad,
     output logic signed [15:0] snd,
     output logic [31:0] dbg_pc,
     output logic        dbg_unimpl,
@@ -102,6 +104,13 @@ module tb_pocket_top #(
         .snd(snd),
         .dbg_pc(dbg_pc), .dbg_unimpl(dbg_unimpl), .dbg_ctrl(dbg_ctrl),
         .dbg_snd_pc(snd_pc), .dbg_snd_stalls(snd_stalls), .dbg_snd_word(snd_word)
+    );
+
+    // what core_top puts between the core and the Pocket
+    stv_pad u_pad (
+        .clk(clk), .cen_dot(u_core.pix_ce),
+        .rgb_i(rgb), .de_i(de), .hs_i(1'b0), .vs_i(1'b0), .hb_i(1'b0), .vb_i(vblank),
+        .rgb_o(rgb_pad), .de_o(de_pad), .hs_o(), .vs_o(), .hb_o(), .vb_o()
     );
 
     // Two requests' acks that coincide with another client's rising request
