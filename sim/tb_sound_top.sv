@@ -10,7 +10,9 @@ module tb_sound_top (
     input  logic [9:0]  word,             // bits 9:0 of the latch at 0x01E00000
     output logic signed [15:0] snd,
     output logic [15:0] stalls,
-    output logic [15:0] pc
+    output logic [15:0] pc,
+    output logic [17:0] rom_addr_o,     // for the bench's ROM-access log
+    output logic        rom_req_o
 );
     logic [17:0] rom_addr; logic rom_req; logic [7:0] rom_q;
     logic [7:0] rom [1 << 18];
@@ -24,4 +26,6 @@ module tb_sound_top (
         .rom_addr(rom_addr), .rom_req(rom_req), .rom_q(rom_q), .rom_ack(1'b1),
         .snd(snd), .stalls(stalls), .dbg_pc(pc)
     );
+    assign rom_addr_o = rom_addr;
+    assign rom_req_o  = rom_req;
 endmodule

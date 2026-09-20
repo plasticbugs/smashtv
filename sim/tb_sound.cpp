@@ -54,6 +54,10 @@ int main(int argc, char **argv) {
     // output as it stands every 2000th clock, held - and `avg` is the mean of
     // those 2000 clocks, which is what a recording with no aliasing looks
     // like.  The difference between them is the hand-over's own doing.
+    // ROMLOG=<file>: every ROM read's address (u32), to size the cache in
+    // front of the sound ROM from what the program really does
+    FILE *romlog = getenv("ROMLOG") ? fopen(getenv("ROMLOG"), "wb") : nullptr;
+    bool req_d = false;
     std::vector<int16_t> pcm, avg;
     long acc = 0;
     uint64_t total = (uint64_t)((to - from) * CLK);
@@ -62,6 +66,8 @@ int main(int argc, char **argv) {
     for (uint64_t c = 0; c < total; c++) {
         while (e < evs.size() && evs[e].clk <= c) t->word = evs[e++].word;
         tick();
+        if (romlog && t->rom_req_o && !req_d) { uint32_t a = t->rom_addr_o; fwrite(&a, 4, 1, romlog); }
+        req_d = t->rom_req_o;
         acc += (int16_t)t->snd;
         if (c % 2000 == 1999) {
             int16_t v = (int16_t)t->snd;         // signed: Verilator hands it over unsigned
@@ -90,6 +96,7 @@ int main(int argc, char **argv) {
     std::string base = argv[3];
     wav(base, pcm);
     wav(base.substr(0, base.rfind('.')) + "_avg.wav", avg);
+    if (romlog) fclose(romlog);
     delete t;
     return 0;
 }

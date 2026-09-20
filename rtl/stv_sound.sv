@@ -44,6 +44,28 @@ module stv_sound (
 );
     wire reset = rst | ~cmd_reset_n;
 
+    // ---------------- how this is timed ----------------
+    // The 6809 core is one deep block of logic from its registers and its data
+    // input back to its registers and out to its address bus (ADDR is
+    // combinational), and it is enabled once in 48 clocks.  So the SDC gives
+    // three kinds of path SND_MC clocks instead of one:
+    //     6809 register -> 6809 register
+    //     din_r         -> 6809 register
+    //     6809 register -> anything else on this board, and the ROM cache
+    // and this module is written so that is true of them:
+    //   * the 6809 sees its data through din_r, and every source of din_r
+    //     is still for at least SETTLE clocks before the cycle ends - the
+    //     RAMs follow an address that settled at the start of the cycle, the
+    //     PIA's and the YM2151's inputs are sampled once a cycle at SAMPLE,
+    //     and a ROM byte that arrives late holds the cycle open (rom_age);
+    //   * nothing acts on the address bus before phase SETTLE: the ROM
+    //     request and the YM2151's read select wait for it, and every write
+    //     happens on the last clock.
+    // The enables themselves (phase -> cen_e, cen_q) are ordinary one-clock
+    // paths and are NOT in the constraint.
+    localparam int SETTLE = 5;          // > SND_MC (4) in the SDC
+    localparam logic [5:0] SAMPLE = 6'd10;
+
     // ---------------- clocking ----------------
     logic [5:0] phase;
     wire        e_clk = (phase >= 6'd24);
@@ -57,7 +79,10 @@ module stv_sound (
     // found it - 65,535 stalls in ten frames.)
     logic       rom_done;
     logic [7:0] rom_l;
-    wire rom_wait = rom_want && !rom_done && !rom_ack;
+    // ...and the cycle may not end until the byte has been in its register for
+    // SETTLE clocks, because of how this board is timed (below).
+    logic [2:0] rom_age;
+    wire rom_wait = rom_want && (rom_age != 3'(SETTLE));
     wire last     = (phase == 6'd47);
     wire stall    = last && rom_wait;
 
@@ -109,13 +134,14 @@ module stv_sound (
     logic [7:0] cpu_din;
     /* verilator lint_on UNOPTFLAT */
     wire        pia_irqa, pia_irqb;
+    wire        cpu_avma;
 
     mc6809e cpu (
-        .D(cpu_din), .DOut(cpu_dout), .ADDR(cpu_addr), .RnW(cpu_rnw),
+        .D(din_r), .DOut(cpu_dout), .ADDR(cpu_addr), .RnW(cpu_rnw),
         .E(e_clk), .Q(q_clk), .BS(), .BA(),
         .clk(clk), .cen_e(cen_e), .cen_q(cen_q),
         .nIRQ(1'b1), .nFIRQ(~pia_irqa), .nNMI(~pia_irqb),
-        .AVMA(), .BUSY(), .LIC(), .nHALT(1'b1), .nRESET(~reset)
+        .AVMA(cpu_avma), .BUSY(), .LIC(), .nHALT(1'b1), .nRESET(~reset)
     );
     assign dbg_pc = cpu_addr;
 
@@ -147,14 +173,32 @@ module stv_sound (
     assign rom_addr = {bank[1:0], bank[2], cpu_addr[14:0]};
     // The request falls between bus cycles (the address is settled long before
     // phase 3), and there are none while the board is held in reset.
-    wire   rom_want = sel_rom && cpu_rnw && !rom_open && !reset && (phase >= 6'd3);
+    // A 6809 spends a good part of its life in dead cycles, with 0xFFFF on
+    // the address bus and nothing wanted from it.  Taken as reads they are a
+    // ROM access each, all of the same word of whichever bank is selected -
+    // and as the bank changes they chase each other out of the same cache
+    // line (measured: most of the 33,000 cache misses a second in play).  A
+    // cycle is dead when the CPU said so the cycle before (AVMA low) AND the
+    // address is 0xFFFF; asking for both means a wrong AVMA cannot starve a
+    // real read, such as the ROM checksum's of the last byte.
+    logic vma;
+    always_ff @(posedge clk) begin
+        if (rst) vma <= 1'b1;
+        else if (cen_e) vma <= cpu_avma;
+    end
+    wire   dead     = !vma && (cpu_addr == 16'hffff);
+    wire   rom_want = sel_rom && cpu_rnw && !rom_open && !reset && !dead && (phase >= 6'(SETTLE));
     assign rom_req  = rom_want && !rom_done;
     always_ff @(posedge clk) begin
         if (rst || cen_e) rom_done <= 1'b0;
         else if (rom_req && rom_ack) begin rom_done <= 1'b1; rom_l <= rom_q; end
     end
     // the byte as the CPU sees it on the last clock: latched, or arriving now
-    wire [7:0] rom_byte = rom_done ? rom_l : rom_q;
+    always_ff @(posedge clk) begin
+        if (rst || cen_e || !rom_done) rom_age <= 3'd0;
+        else if (rom_age != 3'(SETTLE)) rom_age <= rom_age + 3'd1;
+    end
+    wire [7:0] rom_byte = rom_l;
 
     // The writable window.  44 bytes; a byte reads back from here once it has
     // been written, and from the EPROM until then.
@@ -171,6 +215,20 @@ module stv_sound (
         win_q   <= win[win_a];
         win_hit <= sel_win && win_set[win_a] && (bank == 4'd0);
         if (rst) win_set <= '0;
+    end
+
+    // ---------------- what the 6809 reads, held still ----------------
+    // The command latch, its strobe, the YM2151's interrupt and its status
+    // move when they like; sampled here once a cycle they move at SAMPLE
+    // only, 37 clocks before the 6809 looks.  A strobe is 5 us wide and a
+    // cycle 0.5 us, so none is missed.
+    logic [7:0] cmd_s, ym_dout_s, din_r;
+    logic       cb1_s, ca1_s;
+    always_ff @(posedge clk) begin
+        if (phase == SAMPLE) begin
+            cmd_s <= cmd; cb1_s <= cmd_strobe; ca1_s <= ym_irq_n; ym_dout_s <= ym_dout;
+        end
+        din_r <= cpu_din;
     end
 
     // ---------------- PIA ----------------
@@ -191,10 +249,10 @@ module stv_sound (
         .cs(sel_pia && cen_e), .we(sel_pia && wr_now), .rs(cpu_addr[1:0]),
         .din(cpu_dout), .dout(pia_dout),
         .pa_in(8'h00), .pa_out(pia_pa), .ddra_o(pia_ddra),
-        .ca1(ym_irq_n),                        // MAME inverts an active-high IRQ; jt51's is active low already
+        .ca1(ca1_s),                           // MAME inverts an active-high IRQ; jt51's is active low already
         .ca2(pia_ca2),                         // -> YM2151 /IC
-        .pb_in(cmd), .pb_out(), .ddrb_o(),
-        .cb1(cmd_strobe), .cb2(),
+        .pb_in(cmd_s), .pb_out(), .ddrb_o(),
+        .cb1(cb1_s), .cb2(),
         .irqa(pia_irqa), .irqb(pia_irqb)
     );
 
@@ -222,7 +280,7 @@ module stv_sound (
 
     jt51 ym (
         .rst(reset | ~pia_ca2), .clk(clk), .cen(ym_cen), .cen_p1(ym_cen_p1),
-        .cs_n(~(ym_wr_pend | (sel_ym & cpu_rnw))),
+        .cs_n(~(ym_wr_pend | (sel_ym & cpu_rnw & (phase >= 6'(SETTLE))))),
         .wr_n(~ym_wr_pend),
         .a0(ym_wr_pend ? ym_a0_l : cpu_addr[0]),
         .din(ym_din_l), .dout(ym_dout),
@@ -263,7 +321,7 @@ module stv_sound (
         cpu_din = 8'h00;
         if      (sel_ram) cpu_din = ram_q;
         else if (sel_pia) cpu_din = pia_dout;
-        else if (sel_ym)  cpu_din = ym_dout;
+        else if (sel_ym)  cpu_din = ym_dout_s;
         else if (sel_rom) cpu_din = win_hit ? win_q : rom_open ? 8'h00 : rom_byte;
     end
 
@@ -277,13 +335,21 @@ module stv_sound (
     wire        [7:0]  dac_in = pia_pa | ~pia_ddra;
     wire signed [15:0] dac_s  = {~dac_in[7], dac_in[6:0], 8'h00};
 
-    wire signed [31:0] mix = 32'sd410  * ym_left
-                           + 32'sd410  * ym_right
-                           + 32'sd1024 * dac_s
-                           + 32'sd2458 * cvsd_sample;
-    wire signed [19:0] mix_s = mix[31:12];
-
-    always_ff @(posedge clk)
-        snd <= (mix_s >  20'sd32767) ?  16'sd32767 :
-               (mix_s < -20'sd32768) ? 16'sh8000 : mix_s[15:0];
+    // Three registered stages - the sources, the products, the sum - because
+    // in one clock this was the worst path in the core (-8.4 ns): jt51's
+    // `left`/`right` come through its own output companding, and then four
+    // multiplies and an add.  Three clocks of latency on audio is nothing.
+    logic signed [15:0] m_yl, m_yr, m_dac, m_cvsd;
+    logic signed [31:0] p_ym, p_dac, p_cvsd, m_sum;
+    wire  signed [16:0] m_ysum = {m_yl[15], m_yl} + {m_yr[15], m_yr};
+    wire  signed [19:0] mix_s  = m_sum[31:12];
+    always_ff @(posedge clk) begin
+        m_yl <= ym_left; m_yr <= ym_right; m_dac <= dac_s; m_cvsd <= cvsd_sample;
+        p_ym   <= 32'sd410  * m_ysum;
+        p_dac  <= 32'sd1024 * m_dac;
+        p_cvsd <= 32'sd2458 * m_cvsd;
+        m_sum  <= p_ym + p_dac + p_cvsd;
+        snd    <= (mix_s >  20'sd32767) ?  16'sd32767 :
+                  (mix_s < -20'sd32768) ? 16'sh8000 : mix_s[15:0];
+    end
 endmodule
