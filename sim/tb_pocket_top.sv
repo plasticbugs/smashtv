@@ -6,7 +6,16 @@
 // how fast the CPU really runs; this does.  The image goes in through the
 // download port, as the Pocket sends it.
 `default_nettype none
-module tb_pocket_top (
+module tb_pocket_top #(
+    // The Pocket's video clock, in system clocks: 96 MHz / PLL outclk_1.  The
+    // bench makes pix_sync from it the way core_top does and hands the driver
+    // the pixel the Pocket would sample, so a PLL that disagrees with the
+    // core's dot divider garbles these pictures as it garbles the real one.
+    // (It did, on the first build to reach hardware: VID_DIV was 14, the
+    // divider 12, and every bench had pix_sync tied to 0.)  sim/lint.sh checks
+    // the PLL against the divider; run this with -GVID_DIV=14 to see the static.
+    parameter int VID_DIV = 12
+) (
     input  logic        clk,
     input  logic        reset,            // the Pocket's part: high through power-up and download
     input  logic        dl_we,
@@ -71,8 +80,16 @@ module tb_pocket_top (
     sram_model sram (.clk(clk), .a(sram_a), .dq(sram_dq), .oe_n(sram_oe_n), .we_n(sram_we_n),
                      .ub_n(sram_ub_n), .lb_n(sram_lb_n));
 
+    // clk_vid rises half a system clock after the edge that ends vcnt == 0;
+    // core_top sees its toggle one edge later and pulses pix_sync for the
+    // clock after that.  The Pocket samples what the core holds in vcnt == 0.
+    logic [3:0] vcnt;
+    always_ff @(posedge clk) vcnt <= (vcnt == 4'(VID_DIV - 1)) ? 4'd0 : vcnt + 4'd1;
+    wire pix_sync = (vcnt == 4'd2);
+    assign dot_ce = (vcnt == 4'd1);     // the driver samples after the edge, so one on
+
     smashtv_core u_core (
-        .clk(clk), .rst(reset | ~mem_ready), .pause(pause), .pix_sync(1'b0),
+        .clk(clk), .rst(reset | ~mem_ready), .pause(pause), .pix_sync(pix_sync),
         .mrom_req(mrom_req), .mrom_addr(mrom_addr), .mrom_ack(mrom_ack), .mrom_q(mrom_q),
         .srom_req(srom_req), .srom_addr(srom_addr), .srom_ack(srom_ack), .srom_q(srom_q),
         .gfx_req(gfx_req), .gfx_addr(gfx_addr), .gfx_ack(gfx_ack), .gfx_q(gfx_q),
@@ -81,7 +98,7 @@ module tb_pocket_top (
         .xm_req(xm_req), .xm_we(xm_we), .xm_addr(xm_addr), .xm_d(xm_d), .xm_be(xm_be),
         .xm_ack(xm_ack), .xm_q(xm_q),
         .in0(in0), .in1(in1), .dsw(dsw),
-        .rgb(rgb), .hsync(), .vsync(), .hblank(), .vblank(vblank), .pix_ce(dot_ce), .de(de),
+        .rgb(rgb), .hsync(), .vsync(), .hblank(), .vblank(vblank), .pix_ce(), .de(de),
         .snd(snd),
         .dbg_pc(dbg_pc), .dbg_unimpl(dbg_unimpl), .dbg_ctrl(dbg_ctrl),
         .dbg_snd_pc(snd_pc), .dbg_snd_stalls(snd_stalls), .dbg_snd_word(snd_word)

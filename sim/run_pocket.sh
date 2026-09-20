@@ -5,6 +5,8 @@
 # and after any change to target/pocket/smashtv_mem.sv or to who asks it for
 # what.  Slow - a frame is 1.75 million clocks.
 #
+#   VID_DIV=14 sim/run_pocket.sh ...   the Pocket sampling at 96/14 MHz: what a PLL
+#                                      that disagrees with the dot divider looks like
 #   sim/run_pocket.sh <frames> [every] [-dlgap N]     pictures, the command log
 #                                                     and rtl.wav land in artifacts/pocket/
 set -e
@@ -15,7 +17,7 @@ rom="$root/.build/smashtv.rom"
 verilator --cc --exe --build -j "${JOBS:-8}" -O3 \
     -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
     -Wno-TIMESCALEMOD -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND -Wno-SYNCASYNCNET \
-    "$WAIVERS" --top-module tb_pocket_top -Mdir obj_pocket \
+    "$WAIVERS" --top-module tb_pocket_top -Mdir obj_pocket ${VID_DIV:+-GVID_DIV=$VID_DIV} \
     ../rtl/smashtv_core.sv ../rtl/clk_enables.sv ../rtl/stv_main.sv ../rtl/tms34010.sv \
     ../rtl/stv_video.sv ../rtl/stv_vram.sv ../rtl/stv_blit.sv \
     ../rtl/stv_sound.sv ../rtl/pia6821.sv ../rtl/hc55516.sv \

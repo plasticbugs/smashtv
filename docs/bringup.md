@@ -9,7 +9,7 @@ someone decodes squares off a screen.
 - The whole-machine bench on the real memory glue boots.
 - `./build-local.sh compile`: no negative slack in any corner
   (`projects/output_files/*.sta.summary`), no ignored constraints. The build
-  of commit 6af2cdc did this: bitstream md5 `7de5b402eae50011d0a52f243e6f6bf0`.
+  The current build does: bitstream md5 `c4d302488e0eeeb60fedc8452adc1cec`.
 - The ROM image's md5 matches the MRA's.
 
 ## On the card
@@ -88,6 +88,15 @@ chip, and main RAM and the CMOS are landing on top of each other.
 | picture goes to background colour while the menu is open | the autoerase is not being held by `pause` |
 
 ## Log
+
+- 2026-09-20, build `7de5b402...`: **game audio, game starts and plays, picture
+  is pink static throughout.**  Ruled in at once: CPU, sound board, SDRAM,
+  SRAM (so its 17th address line), download, controls.  Cause: the PLL's video
+  clock was still the template's 96/14 MHz while the core makes a dot every 12
+  clocks - my error; I had written "8 MHz" into the comments and never into
+  the PLL.  `VID_DIV=14 sim/run_pocket.sh` reproduces the static
+  (`artifacts/pocket/hardware_fault/`).  Fixed in build `c4d30248...`; not yet
+  seen on hardware.
 
 Date, build md5, what was seen, what it ruled out. One line each. The theories
 that died belong here as much as the one that lived.

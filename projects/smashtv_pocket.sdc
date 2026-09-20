@@ -1,6 +1,6 @@
 # ==============================================================================
 # Smash TV on the Pocket: timing constraints beyond the BSP's
-# sys_constr.sdc. The 96 MHz system clock, its 6.857 MHz video pair and the
+# sys_constr.sdc. The 96 MHz system clock, its 8 MHz video pair and the
 # shifted SDRAM clock all come from core_pll and are timed as one related
 # group; the two 74.25 MHz inputs and the audio PLL are asynchronous to it.
 # The PLL's fifth output drives nothing in core_top, so no clock of its own

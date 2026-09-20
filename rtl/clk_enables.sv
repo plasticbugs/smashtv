@@ -26,7 +26,15 @@ module clk_enables (
     output logic cen_blit,
     output logic cen_dot
 );
-    logic [3:0] ddot;       // 0..11
+    // The dot rate is clk / DOT_DIV, and the Pocket samples the pixels with
+    // the PLL's video clock (target/pocket/core_pll, outclk_1), so THE TWO MUST
+    // BE THE SAME NUMBER.  They were not, on the first build that reached a
+    // Pocket: the PLL still made the template's 96/14 MHz, pix_sync restarted
+    // this divider every 14 clocks, and the picture was static with the game
+    // playing behind it.  No bench sees clk_vid, so sim/lint.sh now compares
+    // this parameter with the PLL's frequencies and fails if they disagree.
+    localparam int DOT_DIV = 12;
+    logic [3:0] ddot;       // 0..DOT_DIV-1
     logic [7:0] cpuacc, blitacc;
 
     // Pausing freezes the accumulators and masks the enables with the same
@@ -39,7 +47,7 @@ module clk_enables (
             cen_cpu <= 1'b0; cen_blit <= 1'b0;
         end else begin
             if (pix_sync)            ddot <= 4'd0;
-            else if (ddot == 4'd11)  ddot <= 4'd0;
+            else if (ddot == 4'(DOT_DIV - 1)) ddot <= 4'd0;
             else                     ddot <= ddot + 4'd1;
 
             cen_cpu  <= 1'b0;
