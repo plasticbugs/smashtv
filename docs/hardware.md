@@ -194,6 +194,20 @@ menu entry is a claim that the gateware does something."
 
 Factory default is all switches off, i.e. **0xFFFF**.
 
+### A blank CMOS *(measured)*
+
+With the battery-backed RAM all zeros - MAME's default when it has no saved
+`nvram`, and what a Pocket has on its first boot - the game finishes its
+power-up tests, prints **FAILURE IN CMOS RAM** and then **DEFAULT ADJUSTMENTS
+RESTORED.**, holds that for about 400 frames (frames ~1050-1450) and goes on to
+attract mode with factory settings written. It is not a fault. MAME with an
+empty NVRAM and the RTL machine are pixel-identical through it (frames 1100,
+1200, 1300, 1500). MAME *saves* the CMOS when it exits, so a second run does
+not show the screen - which is why `tools/mame.sh` gives every run an empty,
+throwaway NVRAM: two captures are otherwise of two different machines. For
+the core it means the CMOS has to be persisted (an APF save) or every
+power-on spends seven seconds on this screen and forgets the high scores.
+
 ---
 
 ## 4. Interrupts
@@ -312,16 +326,48 @@ YM2151 timer interrupt reaches it as a FIRQ.
 DAC **0.25**, HC-55516 **0.60**, all to one mono speaker. These are the
 numbers to derive the mix from — METHODOLOGY §5.12, *derive, do not fit*.
 
-### The sound-ROM write window
+### The writable window in the ROM space *(measured)*
 
 `init_smashtv` calls `init_generic(6, SOUND_CVSD_SMALL, 0x9CF6, 0x9D21)`
 (`midyunit_m.cpp`). `SOUND_CVSD_SMALL` installs a write handler over 6809
-addresses **0x9CF6-0x9D21** (44 bytes) that redirects writes into the sound
-ROM image at bank 0, with the comment "because the entire CVSD ROM is banked,
-we have to make sure that writes go to the proper location". This is a
-protection workaround in MAME, not a description of a chip. §10 has it as an
-open question: it has to be understood before the sound board is built,
-because a real board has no RAM there.
+addresses **0x9CF6-0x9D21** (44 bytes) that stores the byte in MAME's copy of
+the sound ROM at bank 0.
+
+The program uses it. `tools/snd_trace.lua`, 60 s through boot, attract, a coin
+and 28 s of play: **66 writes and 660 reads** of that range, all the writes
+from one routine (PC 0x8B2D: `LDX #$9D06`, index by channel, `LDD 8,U`,
+`STD ,X`) keeping **eight 16-bit pointers, one per sound channel, at
+0x9D06-0x9D15**. The EPROM is blank there (0xFF). On a board with nothing but
+an EPROM at those addresses the pointers would read back 0xFFFF, so there is
+something writable there on the real board that MAME describes only by its
+effect. The gateware does what MAME does, exactly: a byte written to the range
+(under any bank) reads back from it while bank 0 is selected, the EPROM's own
+byte is read until then, and nothing clears it but power-up
+(`rtl/stv_sound.sv`, "the writable window").
+
+### What the board does over a minute *(measured, same capture)*
+
+- Attract mode is **silent**: no command reaches the board between the two
+  resets the main CPU gives it at power-up (0.0 s and 19.1 s) and the coin.
+- The bank register takes the values 0, 1, 2, 4, 5 and 6 - every half of all
+  three EPROMs, never 3 (no chip) and never with bit 3 set.
+- The CVSD runs at about **24,800 bits a second** when it is speaking, which
+  is 80 E cycles a bit, in bursts that last for seconds; the DAC is written
+  9,000-12,000 times a second during play and the YM2151 13,000-40,000.
+- The DAC idles at 0x00, not at mid-scale: the board's output sits at -0.25
+  of full scale whenever nothing is playing, and for the first 14 ms after
+  power-up at +0.25, because port A reads high at the DAC until the program
+  makes it an output. MAME's recording shows both and so does the RTL.
+
+### Levels
+
+`dac.cpp`: the MC1408 is `dac_mapper_unsigned` over -1..+1, so 0x00 is -1.0 and
+0xFF is +0.992. `hc55516.cpp` hands over `m_next_sample / 32768`. So with every
+source taken to a 16-bit full scale the mix is 0.10 x (YM left + YM right) +
+0.25 x DAC + 0.60 x CVSD, which can reach 1.05 and is saturated. **MAME's
+device has no filter after the HC-55516** - its model of the newer D-11581
+board does - so neither has the gateware; the real board certainly has one,
+and that is a difference from the cabinet that MAME cannot arbitrate.
 
 ---
 
@@ -637,11 +683,10 @@ before it is left out for good:
    way round would look right in simulation against MAME and wrong on
    hardware — so this needs the schematic or a `-log` of the game's vector
    table before the CPU is wired up.
-4. **The 6809 write window at 0x9CF6-0x9D21.** MAME redirects writes there
-   into the sound ROM image. Whether the real board has RAM at those
-   addresses, or the game is writing to ROM and reading back the ROM's own
-   contents, changes what the sound board must do. Resolve with Ghidra on
-   `sl2.u4` before building the sound board.
+4. **The 6809 write window at 0x9CF6-0x9D21.** *Settled as far as MAME can
+   settle it* (section 6): the program keeps eight channel pointers there and
+   reads them back, so it is writable, and the gateware models it as MAME
+   does. What the part is on the real board is still not known.
 5. **The watchdog.** The EP800 counts the toggling of control bits 1-0 (and
    possibly the TMS34010's /BLANK). Its period is not known. Nothing in MAME
    models it, so nothing here can be checked against MAME; the number matters

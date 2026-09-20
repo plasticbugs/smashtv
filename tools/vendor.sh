@@ -6,7 +6,8 @@
 #
 # Siblings that are known-good on hardware, and what they carry:
 #   ../masterw    cpu-fx68k (68000)  cpu-tv80 (Z80)  sound-jt03 (YM2203)  sound-jt49 (AY/SSG)
-#   ../cadash     cpu-fx68k  cpu-tv80  jt51 (YM2151)
+#   ../cadash     cpu-fx68k  cpu-tv80  sound-jt51 (YM2151)
+#   ../xenophobe  cpu-mc6809 (MC6809E, on clock enables)  sound-jt51
 # Record the module, its upstream, where it came via and its licence in
 # modules/VENDOR.md, then run tools/gen_qip.sh.  A block proven in another
 # core is proven on that core's signal: METHODOLOGY section 5.14.
