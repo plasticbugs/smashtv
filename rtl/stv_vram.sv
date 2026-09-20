@@ -107,14 +107,29 @@ module stv_vram (
     logic  [9:0] t_addr;
     logic  [7:0] t_pix, t_pal;
 
+    // The write port is registered once before the RAMs.  The two planes are
+    // 256 block RAMs spread over the whole device, and the arbitration below
+    // going straight to their write enables was a 16 ns path.  So a write
+    // lands one clock after it is granted.  Nothing reads that soon: the
+    // display's first read of a row is two clocks after the row lock closes
+    // on it, the CPU's reads are several clocks after its own writes, and
+    // the autoerase reads the templates, which only the CPU writes.
+    logic [16:0] wq_addr;
+    logic        wq_pix_en, wq_pal_en, wq_tpl;
+    logic  [7:0] wq_pix, wq_pal;
     always_ff @(posedge clk) begin
-        if (w_pix_en) begin
-            if (w_tpl) pix_tpl[w_addr[9:0]] <= w_pix;
-            else       pix_ram[w_addr]      <= w_pix;
+        wq_addr <= w_addr; wq_pix <= w_pix; wq_pal <= w_pal; wq_tpl <= w_tpl;
+        wq_pix_en <= w_pix_en && !rst; wq_pal_en <= w_pal_en && !rst;
+    end
+
+    always_ff @(posedge clk) begin
+        if (wq_pix_en) begin
+            if (wq_tpl) pix_tpl[wq_addr[9:0]] <= wq_pix;
+            else        pix_ram[wq_addr]      <= wq_pix;
         end
-        if (w_pal_en) begin
-            if (w_tpl) pal_tpl[w_addr[9:0]] <= w_pal;
-            else       pal_ram[w_addr]      <= w_pal;
+        if (wq_pal_en) begin
+            if (wq_tpl) pal_tpl[wq_addr[9:0]] <= wq_pal;
+            else        pal_ram[wq_addr]      <= wq_pal;
         end
         r_pix <= pix_ram[r_addr];
         r_pal <= pal_ram[r_addr];

@@ -227,7 +227,14 @@ module stv_video #(
     // knew a fetch was coming -- one word a line, which put one pixel a frame
     // on the screen during the power-up RAM test.  Combinational, the door in
     // stv_vram sees it on the same edge the request arrives.
-    assign rf_start = sol && vis_y && dpyctl[15];
+    // vis_y is two nine-bit compares; registered, because rf_start goes on
+    // through the frame buffer's row lock and port arbitration to a write
+    // enable, and with the compares in front that was -5.0 ns.  vline only
+    // changes at the end of a line, twelve clocks before `sol`, so the
+    // registered copy is the same value whenever rf_start can be true.
+    logic vis_y_q;
+    always_ff @(posedge clk) vis_y_q <= vis_y;
+    assign rf_start = sol && vis_y_q && dpyctl[15];
     assign rf_row   = row_now;
 
     always_ff @(posedge clk) begin
