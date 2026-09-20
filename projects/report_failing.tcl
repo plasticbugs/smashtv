@@ -13,7 +13,7 @@ update_timing_netlist
 # SKIP: a register pattern to leave out as a destination, for when one bus's
 # thousands of paths hide everything else (set it with `-tclargs`? no: edit
 # here).  Empty means nothing is left out.
-set skip {*|stv_sound:u_snd|snd[*]*}
+set skip {}
 set all_to [all_registers]
 if {$skip ne ""} { set all_to [remove_from_collection $all_to [get_registers $skip]] }
 report_timing -setup -npaths 20000 -less_than_slack 0 -detail summary -to $all_to \

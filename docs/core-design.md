@@ -63,16 +63,23 @@ capacity, it is which memory each thing needs to be in.
 
 | what | size | where | why |
 |---|---|---|---|
-| program ROM | 256 KB | SDRAM word 0x000000 | read by one client, cachable |
-| sound ROM | 192 KB | SDRAM word 0x020000 | **behind a cache**; the 6809 must never stall |
-| graphics ROM | 1.5 MB | SDRAM word 0x100000 | read sequentially, in bursts |
+| program ROM | 256 KB | SDRAM word 0x000000 | read a word at a time, nine clocks |
+| sound ROM | 192 KB | SDRAM word 0x020000 | **behind `rom_cache.sv`**; the 6809 must never stall |
+| graphics ROM | 1.5 MB | SDRAM word 0x100000 | read sequentially: a read-ahead window over the burst port |
 | frame buffer rows 0-255 | 2.0 Mbit | **block RAM** | one write per blitter pixel and one read per displayed pixel; see §3 |
 | frame buffer rows 510-511 | 16 Kbit | **block RAM** | the autoerase templates, read once per line |
 | frame buffer rows 256-509 | 254 KB | SDRAM word 0x400000 (bank 1) | *(measured)* only the power-up RAM test and one blit in 90 seconds touch these |
 | main RAM | 128 KB | **Pocket SRAM** word 0x00000 | ≤ 5 M accesses/s against a port that does 13.7 M reads/s |
-| CMOS | 32 KB | **Pocket SRAM** word 0x10000 | rarely touched; battery-backed on the board, an APF save slot here |
+| CMOS | 32 KB | **Pocket SRAM** word 0x10000 | rarely touched; battery-backed on the board. **Not yet saved to the card** - see §8 |
+| palette read-back | 16 KB | **Pocket SRAM** word 0x14000 | the CPU reads the palette back; the copy the video uses is block RAM |
 | palette | 4096 × 16 | block RAM | one read per displayed pixel |
 | sound RAM | 2 KB | block RAM | |
+| sound ROM cache | 2048 × 23 | block RAM | |
+
+The SRAM is used past its first 64K words, which makes this **the first of
+these cores to drive the chip's seventeenth address line**
+(`target/pocket/sram_port.sv` had a 16-bit address). `core_top`'s power-on
+self-test writes one word either side of it and shows both on the panel.
 
 Block RAM: 132,096 words of frame buffer + 4,096 of palette + 2 KB of sound
 RAM. In M10K blocks at 16 bits wide (512 words each) that is **258 + 8 + 2 =
@@ -185,10 +192,10 @@ client's ack is asserted. **Zero is not the expected answer; surviving it is.**
 | part | checked by |
 |---|---|
 | blitter, frame buffer, scanout | `sim/run_video.sh`: the RTL loaded with a frozen state, fed the same trace, diffed against `tools/render_model.py` — zero differing palette indices |
-| TMS34010 | a bus trace against MAME, transaction by transaction, and per-instruction cycle counts (METHODOLOGY §4, the pattern `rtl/i8085.sv` was built on). `tools/bus_trace.lua` and `tools/diff_bus.py` exist and are self-tested; the CPU does not. Measured: the trace sees **every** instruction fetch, including the repeated fetches of a tight loop, so MAME is not skipping bus cycles for its instruction cache and the comparison can be one-to-one |
+| TMS34010 | a bus trace against MAME, transaction by transaction, and per-instruction cycle counts (METHODOLOGY §4, the pattern `rtl/i8085.sv` was built on). `sim/run_cpu.sh` does both, from files or live from two MAME runs. Measured: the trace sees **every** instruction fetch, including the repeated fetches of a tight loop, so MAME is not skipping bus cycles for its instruction cache and the comparison can be one-to-one |
 | the whole machine, ideal memories | frames against MAME |
 | the whole machine, real memory glue | `sim/run_pocket.sh` — **before the first flash** (METHODOLOGY §5.16) |
-| sound | band energy per second against a MAME recording, over a whole capture in play (METHODOLOGY §5.9) |
+| sound | `sim/run_sound.sh`: MAME's command stream replayed into `rtl/stv_sound.sv`, band energy per second against MAME's recording over a whole minute including 28 s of play (METHODOLOGY §5.9) |
 
 ---
 
@@ -207,3 +214,19 @@ good:
 - interlace (DPYCTL bit 14 is 1);
 - the protection PLD (`init_smashtv` disables it);
 - input ports IN2, UNK0 and UNK1 (never read).
+
+---
+
+## 8. Not built yet
+
+- **Saving the CMOS.** The game's settings, audits and high scores are 32 KB
+  in the Pocket's SRAM and are lost at power-off, so every boot shows FAILURE
+  IN CMOS RAM for seven seconds and restores the defaults
+  (`docs/hardware.md` §3). The S.T.U.N. Runner core has a save slot proven on
+  hardware (a loader, an unloader and a save timer on the APF's dataslot
+  commands); here the memory behind it is the shared SRAM rather than a block
+  RAM of its own, so the unloader needs a turn on `sram_port`. It is a
+  feature for after the first boot on hardware, not a condition of it.
+- **The watchdog** (`docs/hardware.md` §10). Nothing resets the game if the
+  program hangs, and nothing resets it when the menu has been open a long
+  time either.

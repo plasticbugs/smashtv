@@ -101,3 +101,30 @@ set CPU_FAST [get_registers {*|tms34010:u_cpu|stepcnt[*] *|tms34010:u_cpu|q_ack 
 set CPU_STEP [remove_from_collection $CPU_ALL $CPU_FAST]
 set_multicycle_path -setup 3 -from $CPU_STEP -to $CPU_STEP
 set_multicycle_path -hold  2 -from $CPU_STEP -to $CPU_STEP
+
+# The TMS34010's address out to the main board's read multiplexer.  bus_addr
+# moves on a step with the request; rtl/stv_main.sv's bus machine sees the
+# request a clock later and latches c_rd a clock after that at the earliest.
+set_multicycle_path -setup 2 -from [get_registers {*|tms34010:u_cpu|bus_addr[*]}] -to [get_registers {*|stv_main:u_main|c_rd[*]}]
+set_multicycle_path -hold  1 -from [get_registers {*|tms34010:u_cpu|bus_addr[*]}] -to [get_registers {*|stv_main:u_main|c_rd[*]}]
+
+# The sound board's 6809 (rtl/stv_sound.sv, "how this is timed").  It is
+# enabled once in 48 clocks; its data input is a register, din_r, whose
+# sources are still for SETTLE (5) clocks before the cycle ends; and nothing
+# acts on its address bus until SETTLE clocks into the cycle.  So these three
+# kinds of path have SND_MC clocks.  The enables (phase -> cen_e, cen_q) are
+# NOT among them and stay at one.
+set SND_MC  4
+set SND_CPU [get_registers {*|stv_sound:u_snd|mc6809e:cpu|*}]
+set SND_DIN [get_registers {*|stv_sound:u_snd|din_r[*]}]
+set SND_ALL [get_registers {*|stv_sound:u_snd|*}]
+set SND_EXT [remove_from_collection $SND_ALL $SND_CPU]
+set SND_ROMC [get_registers {*|smashtv_mem:u_mem|rom_cache:u_scache|*}]
+set_multicycle_path -setup $SND_MC -from $SND_CPU -to $SND_CPU
+set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to $SND_CPU
+set_multicycle_path -setup $SND_MC -from $SND_DIN -to $SND_CPU
+set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_DIN -to $SND_CPU
+set_multicycle_path -setup $SND_MC -from $SND_CPU -to $SND_EXT
+set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to $SND_EXT
+set_multicycle_path -setup $SND_MC -from $SND_CPU -to $SND_ROMC
+set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to $SND_ROMC

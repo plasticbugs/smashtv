@@ -7,22 +7,22 @@
                 "mappings": [
                     {
                         "id": 100,
-                        "name": "Button 2",
+                        "name": "Fire Down",
                         "key": "pad_btn_b"
                     },
                     {
                         "id": 101,
-                        "name": "Button 1",
+                        "name": "Fire Right",
                         "key": "pad_btn_a"
                     },
                     {
                         "id": 102,
-                        "name": "Button 2 (alt)",
+                        "name": "Fire Up",
                         "key": "pad_btn_x"
                     },
                     {
                         "id": 103,
-                        "name": "Button 1 (alt)",
+                        "name": "Fire Left",
                         "key": "pad_btn_y"
                     },
                     {

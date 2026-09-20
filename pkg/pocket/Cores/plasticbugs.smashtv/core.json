@@ -6,7 +6,7 @@
         "smashtv"
       ],
       "shortname": "smashtv",
-      "description": "Smash TV (MANUFACTURER, YEAR) arcade core",
+      "description": "Smash T.V. (Williams, 1990) arcade core",
       "author": "plasticbugs",
       "url": "https://github.com/plasticbugs/analogue-pocket-smashtv",
       "version": "0.0.1",

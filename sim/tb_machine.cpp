@@ -14,6 +14,8 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+#include <map>
+#include <algorithm>
 
 static Vtb_machine_top *dut;
 static long cycles = 0;
@@ -52,6 +54,14 @@ int main(int argc, char **argv) {
     std::vector<uint8_t> fb(1024 * 512 * 3, 0);
     int x = 0, y = 0, maxx = 0; bool was_de = false, was_vb = true;
     long frame = 0; long snd = 0;
+    uint32_t cyc0 = 0; long clk0 = 0;
+    // PROFILE="from to": which instructions take longer than MAME charges
+    // them, by address, over that range of frames
+    long prof0 = -1, prof1 = -1;
+    if (const char *d = getenv("PROFILE")) sscanf(d, "%ld %ld", &prof0, &prof1);
+    struct Prof { long n = 0, clocks = 0, cycles = 0; };
+    std::map<uint32_t, Prof> prof;
+    uint32_t p_pc = 0, p_cyc = 0; long p_clk = 0; bool p_have = false; unsigned p_st = 0;
     FILE *sndlog = fopen((out + "/snd_cmd.txt").c_str(), "w");
     // DENSE="from to": every frame in that range is written as well
     long dense0 = -1, dense1 = -1;
@@ -59,6 +69,16 @@ int main(int argc, char **argv) {
     uint32_t last_pc = 0; long same = 0;
     while (frame < nframes) {
         tick();
+        // an instruction begins as the machine enters S_DECODE
+        const unsigned cst = dut->rootp->tb_machine_top__DOT__u_main__DOT__u_cpu__DOT__state;
+        const bool begins = (cst == 4 && p_st != 4); p_st = cst;
+        if (prof0 >= 0 && begins) {
+            uint32_t cyc = dut->rootp->tb_machine_top__DOT__u_main__DOT__u_cpu__DOT__cyc_total;
+            if (p_have && frame >= prof0 && frame < prof1) {
+                auto &e = prof[p_pc]; e.n++; e.clocks += cycles - p_clk; e.cycles += uint32_t(cyc - p_cyc);
+            }
+            p_pc = dut->dbg_pc; p_cyc = cyc; p_clk = cycles; p_have = true;
+        }
         if (dut->snd_strobe) {
             // the core's own command log, in tools/snd_trace.lua's format, so
             // it can be held against MAME's and replayed into the sound bench
@@ -94,12 +114,29 @@ int main(int argc, char **argv) {
                 for (int r = 0; r < y; r++) fwrite(&fb[r*1024*3], 1, maxx*3, f);
                 fclose(f);
             }
+            if (frame % every == 0) {
+                // the CPU's speed against MAME's 5,000,000 cycles a second (see tb_pocket.cpp)
+                uint32_t cyc = dut->rootp->tb_machine_top__DOT__u_main__DOT__u_cpu__DOT__cyc_total;
+                printf("CPU %.1f%%  ", 100.0 * double(uint32_t(cyc - cyc0)) / (double(cycles - clk0) * 5.0 / 96.0));
+                cyc0 = cyc; clk0 = cycles; }
             if (frame % every == 0) { printf("frame %ld: %dx%d, PC %08x, ctrl %02x, %ld sound writes, %.1f M clocks\n",
                    frame, maxx, y, dut->dbg_pc, dut->dbg_ctrl, snd, cycles / 1e6); fflush(stdout); }
             y = 0; maxx = 0;
         }
         was_vb = dut->vblank;
         if (cycles > 40000000000L) break;
+    }
+    if (prof0 >= 0) {
+        std::vector<std::pair<uint32_t, Prof>> v(prof.begin(), prof.end());
+        auto over = [](const Prof &e) { return e.clocks - e.cycles * 19.2; };
+        std::sort(v.begin(), v.end(), [&](auto &a, auto &b) { return over(a.second) > over(b.second); });
+        printf("instructions that took longer than they were charged, frames %ld-%ld:\n", prof0, prof1);
+        printf("  %-10s %9s %12s %12s %8s\n", "PC", "count", "clocks each", "charged each", "over");
+        for (size_t i = 0; i < v.size() && i < 25; i++) {
+            auto &e = v[i].second; if (over(e) <= 0) break;
+            printf("  %08x   %9ld %12.1f %12.1f %7.0f%%\n", v[i].first, e.n, double(e.clocks) / e.n,
+                   19.2 * e.cycles / e.n, 100.0 * over(e) / (19.2 * e.cycles));
+        }
     }
     delete dut;
     return 0;

@@ -87,7 +87,7 @@
                 ]
             },
             {
-                "name": "Service Switch",
+                "name": "Service Button",
                 "id": 40,
                 "type": "check",
                 "enabled": true,
@@ -96,6 +96,17 @@
                 "defaultval": 0,
                 "mask": "0xFFFFFEFF",
                 "value": "0x00000100"
+            },
+            {
+                "name": "Test Switch",
+                "id": 41,
+                "type": "check",
+                "enabled": true,
+                "persist": false,
+                "address": "0xF1000000",
+                "defaultval": 0,
+                "value": "0x00008000",
+                "mask": "0xFFFF7FFF"
             },
             {
                 "name": "Bring-up: panel",

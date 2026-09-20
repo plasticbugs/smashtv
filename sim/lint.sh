@@ -43,7 +43,7 @@ done
 
 printf '%-20s ' "pocket memories"
 out=$(verilator --lint-only $OPTS "$WAIVE" --top-module smashtv_mem \
-      "$root"/target/pocket/smashtv_mem.sv "$root"/target/pocket/sdram_ctrl.sv \
+      "$root"/target/pocket/smashtv_mem.sv "$root"/target/pocket/rom_cache.sv "$root"/target/pocket/sdram_ctrl.sv \
       "$root"/target/pocket/sram_port.sv 2>&1 \
       | grep -E '^%(Error|Warning)' | grep -v 'Exiting due to' \
       | grep -v 'sdram_ctrl.sv' || true)

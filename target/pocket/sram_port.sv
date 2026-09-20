@@ -1,11 +1,18 @@
 `default_nettype none
 
 //------------------------------------------------------------------------------
-// The Pocket's asynchronous SRAM, which this core uses for the tilemap VRAM
-// (docs/core-design.md section 2).
+// The Pocket's asynchronous SRAM, which this core uses for the TMS34010's main
+// RAM, the CMOS and the palette's read-back copy (docs/core-design.md
+// section 2).
 //
-// Carried over from the Gaiapolis core, where it is proven on hardware. Every
-// pin is a register in its IO cell (projects/smashtv_pocket.qsf) so the pin
+// Carried over from the Gaiapolis core, where it is proven on hardware - with
+// ONE change: the address is 17 bits here, where every core before this one
+// used 16 and tied the chip's A16 low.  This machine needs 0x16000 words.  The
+// pin was always driven and constrained; what is new is that it moves, and
+// core_top's power-on self-test writes a word either side of it to prove on
+// the first flash that it is a real address line (docs/bringup.md, row 3).
+//
+// Every pin is a register in its IO cell (projects/smashtv_pocket.qsf) so the pin
 // timing is the same on every build; `slow` and `slow_wr` stretch the read
 // capture and the write strobe by a clock and are exposed in the Pocket menu
 // as diagnostics.
@@ -16,7 +23,7 @@ module sram_port (
     input  logic        slow_wr,        // WE low one clock longer, data held one longer
     input  logic        req,
     input  logic        we,
-    input  logic [15:0] addr,
+    input  logic [16:0] addr,
     input  logic  [1:0] be,
     input  logic [15:0] wdata,
     output logic        ack,
@@ -28,7 +35,8 @@ module sram_port (
 );
     typedef enum logic [3:0] { S_IDLE, S_R1, S_R2, S_R3, S_R4, S_R5, S_RCAP, S_W0, S_W1, S_W1B, S_W2, S_W3, S_W3B, S_ACK } st_t;
     st_t         st;
-    logic [15:0] addr_l, dq_out;
+    logic [16:0] addr_l;
+    logic [15:0] dq_out;
     logic        we_l, dq_oe;
     logic [15:0] dq_in;
     assign sram_dq = dq_oe ? dq_out : 16'bz;
@@ -42,7 +50,7 @@ module sram_port (
         end else case (st)
             S_IDLE: if (req && !ack) begin      // not the request being acked right now
                 addr_l <= addr; we_l <= we;
-                sram_a <= {1'b0, addr};
+                sram_a <= addr;
                 if (we) begin
                     dq_out <= wdata; dq_oe <= 1'b1;
                     sram_ub_n <= ~be[1]; sram_lb_n <= ~be[0]; sram_oe_n <= 1'b1;

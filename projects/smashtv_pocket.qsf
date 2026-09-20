@@ -18,10 +18,9 @@ set_global_assignment -name TOP_LEVEL_ENTITY apf_top
 # Compiler Assignments
 # ==============================================================================
 set_global_assignment -name NUM_PARALLEL_PROCESSORS 1
-# Area-first: the enable-stepped cores have generous multicycle budgets (see
-# the .sdc), so trading peak Fmax for logic density is the right side of the
-# curve -- the SPEED/HIGH-PERFORMANCE setting overflowed the device by 59 ALMs.
-set_global_assignment -name OPTIMIZATION_MODE "AGGRESSIVE AREA"
+# The template has AGGRESSIVE AREA here, from a core that was short of ALMs.
+# This one is at 67% of them and short of slack instead, so: balanced.
+set_global_assignment -name OPTIMIZATION_MODE BALANCED
 set_global_assignment -name SAVE_DISK_SPACE OFF
 set_global_assignment -name SMART_RECOMPILE OFF
 
@@ -889,3 +888,19 @@ set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_we_n
 # is a real silicon failure, not lost margin, so let the fitter pad every
 # path, not just the pins.
 set_global_assignment -name OPTIMIZE_HOLD_TIMING "ALL PATHS"
+
+# A synchroniser is three flops in a row, which is also what Quartus looks for
+# when it turns shift registers into RAM: the third compile had packed several
+# of core_top's synch_3 chains into one altshift_taps block RAM.  That is not a
+# synchroniser any more, and it spends a block RAM this design is short of.
+# jt51's long shift registers are left to it - those are meant to be RAM.
+set_instance_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF -to "core_top:ic|synch_3:*"
+
+# The two CPUs are multicycle regions (projects/smashtv_pocket.sdc): their
+# registers are enabled one clock in several and the paths among them are given
+# that many clocks.  Register retiming moves registers through logic without
+# knowing that: in the fourth compile it pulled the TMS34010's register-read
+# multiplexers' registers back towards the core's reset and made a -5.6 ns
+# one-clock path out of it (reset -> tms34010|r_s[*]~..._OTERM).  So not here.
+set_instance_assignment -name ALLOW_REGISTER_RETIMING OFF -to "core_top:ic|smashtv_core:u_core|stv_main:u_main|tms34010:u_cpu"
+set_instance_assignment -name ALLOW_REGISTER_RETIMING OFF -to "core_top:ic|smashtv_core:u_core|stv_sound:u_snd|mc6809e:cpu"
