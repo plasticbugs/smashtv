@@ -41,7 +41,7 @@ module tb_machine_top (
     logic        xm_req, xm_we, xm_ack; logic [16:0] xm_addr; logic [15:0] xm_d, xm_q; logic [1:0] xm_be;
 
     stv_main u_main (
-        .clk(clk), .rst(rst), .cen_cpu(cen_cpu), .cen_dot(dot_ce), .cen_blit(cen_blit),
+        .clk(clk), .rst(rst), .cen_cpu(cen_cpu), .cen_dot(dot_ce), .cen_blit(cen_blit), .pause(1'b0),
         .mrom_req(mrom_req), .mrom_addr(mrom_addr), .mrom_ack(mrom_ack), .mrom_q(mrom_q),
         .gfx_req(gfx_req), .gfx_addr(gfx_addr), .gfx_ack(gfx_ack), .gfx_q(gfx_q),
         .ram_req(ram_req), .ram_we(ram_we), .ram_addr(ram_addr), .ram_d(ram_d),

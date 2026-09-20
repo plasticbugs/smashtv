@@ -20,6 +20,10 @@ module stv_main (
     input  logic        cen_cpu,        // 5 MHz machine cycles
     input  logic        cen_dot,        // 8 MHz dots
     input  logic        cen_blit,       // one blitter pixel, 41 ns
+    // The Pocket's menu is open: the enables above have stopped, and the
+    // raster has not.  The autoerase belongs to the raster, and left running
+    // it would wipe a picture nothing is redrawing, so it stops too.
+    input  logic        pause,
 
     // ---------------- program ROM: 131072 words from 0xFFE00000
     output logic        mrom_req,
@@ -148,7 +152,7 @@ module stv_main (
         .vreg_we(vreg_we), .vreg_a(A[8:4]), .vreg_d(c_wd), .vreg_q(vreg_q),
         .hcount_q(), .vcount_q(),
         .pal_we(pal_we), .pal_a(A[15:4]), .pal_d(c_wd), .pal_be(2'b11),
-        .autoerase(~ctrl[4]),
+        .autoerase(~ctrl[4] & ~pause),
         .rf_start(rf_start), .rf_row(rf_row), .rf_valid(rf_valid), .rf_col(rf_col),
         .rf_pix(rf_pix), .rf_pal(rf_pal), .rf_busy(rf_busy),
         .ae_start(ae_start), .ae_row(ae_row), .ae_busy(ae_busy),
