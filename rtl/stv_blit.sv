@@ -192,7 +192,7 @@ module stv_blit (
                 // 3. the flip-x adjustment, or the plain row stride
                 B_S2: begin
                     if (flipx) begin
-                        off <= off - (32'(w - 18'sd1) << 3);
+                        off <= off - ((32'(w) - 32'd1) << 3);
                         rb  <= (rb - w + 18'sd3) & ~18'sd3;
                         xs  <= xs + w - 18'sd1;
                     end else begin
@@ -226,7 +226,7 @@ module stv_blit (
                     if (!flipx) begin
                         if (xs < 0) begin
                             w       <= w + xs;
-                            clipoff <= clipoff + (32'(-xs) << 3);
+                            clipoff <= clipoff + ((32'd0 - 32'(xs)) << 3);
                             xs      <= '0;
                         end else if (xs + w > 18'sd512) begin
                             w       <= 18'sd512 - xs;
@@ -234,7 +234,7 @@ module stv_blit (
                     end else begin
                         if (xs >= 18'sd512) begin
                             w       <= w - (xs - 18'sd511);
-                            clipoff <= clipoff + (32'(xs - 18'sd511) << 3);
+                            clipoff <= clipoff + ((32'(xs) - 32'd511) << 3);
                             xs      <= 18'sd511;
                         end else if (xs - w < 0) begin
                             w       <= xs;

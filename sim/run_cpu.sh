@@ -24,7 +24,7 @@ verilator --cc --exe --build -j "${JOBS:-8}" -O2 \
     -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM \
     -Wno-PINCONNECTEMPTY -Wno-TIMESCALEMOD \
     -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND \
-    --top-module tb_cpu_top -Mdir obj_cpu \
+    tb_public.vlt --top-module tb_cpu_top -Mdir obj_cpu \
     ../rtl/tms34010.sv tb_cpu_top.sv tb_cpu.cpp > obj_cpu.log 2>&1 \
     || { tail -40 obj_cpu.log; exit 1; }
 if [ -z "$live" ]; then

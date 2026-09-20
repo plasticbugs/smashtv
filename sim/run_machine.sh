@@ -9,7 +9,7 @@ rom="$root/.build/smashtv.rom"
 verilator --cc --exe --build -j "${JOBS:-8}" -O3 \
     -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNUSEDPARAM -Wno-PINCONNECTEMPTY \
     -Wno-TIMESCALEMOD -Wno-BLKSEQ -Wno-MULTIDRIVEN -Wno-WIDTHTRUNC -Wno-WIDTHEXPAND \
-    --top-module tb_machine_top -Mdir obj_machine \
+    tb_public.vlt --top-module tb_machine_top -Mdir obj_machine \
     ../rtl/stv_main.sv ../rtl/tms34010.sv ../rtl/stv_video.sv ../rtl/stv_vram.sv ../rtl/stv_blit.sv \
     tb_machine_top.sv tb_machine.cpp > obj_machine.log 2>&1 || { tail -40 obj_machine.log; exit 1; }
 out="${OUT:-$root/artifacts/machine}"; mkdir -p "$out"; rm -f "$out"/rtl_*.rgb

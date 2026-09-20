@@ -103,25 +103,25 @@ module tms34010 #(
     logic        insn_start_q, irq_taken_q;
 
     // ------------------------------------------------------------ state
-    logic [31:0] ra [15] /* verilator public_flat_rw @(posedge clk) */;   // A0..A14
-    logic [31:0] rb [15] /* verilator public_flat_rw @(posedge clk) */;   // B0..B14
-    logic [31:0] sp      /* verilator public_flat_rw @(posedge clk) */;
-    logic [31:0] pc      /* verilator public_flat_rw @(posedge clk) */;
-    logic [31:0] st      /* verilator public_flat_rw @(posedge clk) */;
+    logic [31:0] ra [15];   // A0..A14
+    logic [31:0] rb [15];   // B0..B14
+    logic [31:0] sp;
+    logic [31:0] pc;
+    logic [31:0] st;
     assign dbg_pc = pc;
 
     localparam int ST_N = 31, ST_C = 30, ST_Z = 29, ST_V = 28, ST_IE = 21;
 
     // I/O registers the CPU itself needs; the rest live outside and are
     // reached over the bus like any other memory.
-    logic [15:0] io_control /* verilator public_flat_rw @(posedge clk) */;
-    logic [15:0] io_convsp  /* verilator public_flat_rw @(posedge clk) */;
-    logic [15:0] io_convdp  /* verilator public_flat_rw @(posedge clk) */;
-    logic [15:0] io_psize   /* verilator public_flat_rw @(posedge clk) */;
-    logic [15:0] io_pmask   /* verilator public_flat_rw @(posedge clk) */;
-    logic [15:0] io_intenb  /* verilator public_flat_rw @(posedge clk) */;
-    logic        io_srt     /* verilator public_flat_rw @(posedge clk) */;   // DPYCTL bit 11
-    logic [15:0] io_intpend /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_control;
+    logic [15:0] io_convsp;
+    logic [15:0] io_convdp;
+    logic [15:0] io_psize;
+    logic [15:0] io_pmask;
+    logic [15:0] io_intenb;
+    logic        io_srt;   // DPYCTL bit 11
+    logic [15:0] io_intpend;
     localparam logic [4:0] IO_CONTROL = 5'h0b, IO_INTENB = 5'h11, IO_INTPEND = 5'h12,
                            IO_CONVSP = 5'h13, IO_CONVDP = 5'h14, IO_PSIZE = 5'h15,
                            IO_PMASK = 5'h16, IO_DPYCTL = 5'h08;
@@ -443,8 +443,11 @@ module tms34010 #(
         G_INIT, G_ROW, G_ROWSRC, G_SEG, G_RDDST, G_PIX, G_SRCRD, G_WRDST, G_ROWEND, G_FIN,
         S_DONE
     } st_t;
-    // S_FETCH is 3, and sim/tb_cpu.cpp's warm start relies on it
-    st_t   state /* verilator public_flat_rw @(posedge clk) */;
+    // S_FETCH is 3, and sim/tb_cpu.cpp's warm start relies on it.  (What the
+    // benches may read and poke in here is listed in sim/tb_public.vlt, not
+    // marked in this file: Verilator 5.020, which is what CI lints with, takes
+    // a public_flat_rw pragma for a second, blocking writer and refuses it.)
+    st_t   state;
     st_t   fe_ret;
 
     logic [15:0] ext [4];
@@ -474,7 +477,7 @@ module tms34010 #(
     logic               cyc_stb;
     // every cycle ever charged, for the bench to hold against MAME's count
     // (sim/tb_cpu.cpp); nothing reads it, so synthesis removes it
-    logic        [31:0] cyc_total /* verilator public_flat_rd */;
+    logic        [31:0] cyc_total;
     logic [31:0] vec_addr;
     logic        push_st_too;           // a trap or interrupt: push ST after PC
     logic [31:0] ret_pc;
