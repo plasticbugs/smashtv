@@ -103,9 +103,9 @@ module stv_vram (
     logic        w_pix_en, w_pal_en, w_tpl;
     logic  [7:0] w_pix, w_pal;
     logic [16:0] r_addr;
-    logic  [7:0] r_pix, r_pal;
+    logic  [7:0] r_pix, r_pal, r_pix0, r_pal0;
     logic  [9:0] t_addr;
-    logic  [7:0] t_pix, t_pal;
+    logic  [7:0] t_pix, t_pal, t_pix_c, t_pal_c;
 
     // The write port is registered once before the RAMs.  The two planes are
     // 256 block RAMs spread over the whole device, and the arbitration below
@@ -131,8 +131,17 @@ module stv_vram (
             if (wq_tpl) pal_tpl[wq_addr[9:0]] <= wq_pal;
             else        pal_ram[wq_addr]      <= wq_pal;
         end
-        r_pix <= pix_ram[r_addr];
-        r_pal <= pal_ram[r_addr];
+        // two stages: the second is the block RAM's own output register, and
+        // without it the read data came through a 128-way multiplexer of
+        // blocks all over the device into the consumer's logic (-0.2 ns)
+        r_pix0 <= pix_ram[r_addr];
+        r_pal0 <= pal_ram[r_addr];
+        r_pix  <= r_pix0;
+        r_pal  <= r_pal0;
+        // the CPU reads the template rows on the T port in the same states,
+        // so its copy of that data is held the same extra clock
+        t_pix_c <= t_pix;
+        t_pal_c <= t_pal;
         t_pix <= pix_tpl[t_addr];
         t_pal <= pal_tpl[t_addr];
     end
@@ -149,14 +158,16 @@ module stv_vram (
     // which is when the board loads its VRAM shift registers, so the row is
     // sampled at one instant the way MAME's scanline callback samples it.
     logic  [9:0] rf_cnt;
-    logic  [8:0] rf_row_l, rf_col_d;
-    logic        rf_run, rf_iss, rf_iss_d;
+    logic  [8:0] rf_row_l, rf_col_d, rf_col_d2;
+    logic        rf_run, rf_iss, rf_iss_d, rf_iss_d2;
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            rf_run <= 1'b0; rf_cnt <= '0; rf_iss <= 1'b0; rf_iss_d <= 1'b0;
+            rf_run <= 1'b0; rf_cnt <= '0; rf_iss <= 1'b0; rf_iss_d <= 1'b0; rf_iss_d2 <= 1'b0;
         end else begin
             rf_iss_d <= rf_iss;
+            rf_iss_d2 <= rf_iss_d;
+            rf_col_d2 <= rf_col_d;
             rf_iss   <= 1'b0;
             rf_col_d <= rf_cnt[8:0];
             if (rf_start) begin
@@ -168,8 +179,8 @@ module stv_vram (
         end
     end
     assign rf_busy  = rf_run;
-    assign rf_valid = rf_iss_d;
-    assign rf_col   = rf_col_d;
+    assign rf_valid = rf_iss_d2;
+    assign rf_col   = rf_col_d2;
     assign rf_pix   = r_pix;
     assign rf_pal   = r_pal;
 
@@ -221,7 +232,7 @@ module stv_vram (
     // each either a local access or one through xm_*.  Nothing is pipelined:
     // a read issues its address, waits a clock for the RAM, and latches.
     typedef enum logic [2:0] {
-        C_IDLE, C_ISSUE, C_LATCH, C_XWAIT, C_NEXT, C_DONE
+        C_IDLE, C_ISSUE, C_RWAIT, C_LATCH, C_XWAIT, C_NEXT, C_DONE
     } cst_t;
     cst_t        cst;
     logic        phase;
@@ -275,21 +286,22 @@ module stv_vram (
                 else if (cpu_we_l) begin
                     if (w_own == OWN_CPU)                cst <= C_NEXT;
                 end else if (cpu_rd_t ? (t_own == OWN_CPU)
-                                      : (r_own == OWN_CPU)) cst <= C_LATCH;
+                                      : (r_own == OWN_CPU)) cst <= C_RWAIT;
             end
+            C_RWAIT: cst <= C_LATCH;        // the RAM's output register
             C_LATCH: begin
                 // the template rows are their own RAMs, so a read of one
                 // comes back on the T port, not the R port
-                if (!phase) cpu_qa <= cpu_tpl_l ? (cpu_bank_l ? t_pix : t_pal)
+                if (!phase) cpu_qa <= cpu_tpl_l ? (cpu_bank_l ? t_pix_c : t_pal_c)
                                                 : (cpu_bank_l ? r_pix : r_pal);
-                else        cpu_qb <= cpu_tpl_l ? (cpu_bank_l ? t_pix : t_pal)
+                else        cpu_qb <= cpu_tpl_l ? (cpu_bank_l ? t_pix_c : t_pal_c)
                                                 : (cpu_bank_l ? r_pix : r_pal);
                 // A shift-register transfer answers with the first pixel's
                 // whole entry, { palette, pixel }, which is what MAME's
                 // to_shiftreg leaves in shiftreg[0]; one access, not two.
                 if (cpu_srt_l) begin
-                    cpu_qa <= cpu_tpl_l ? t_pix : r_pix;
-                    cpu_qb <= cpu_tpl_l ? t_pal : r_pal;
+                    cpu_qa <= cpu_tpl_l ? t_pix_c : r_pix;
+                    cpu_qb <= cpu_tpl_l ? t_pal_c : r_pal;
                     cst    <= C_DONE;
                 end else cst <= C_NEXT;
             end

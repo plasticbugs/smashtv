@@ -8,6 +8,7 @@ if {[catch {project_open smashtv_pocket -revision smashtv_pocket} err]} {
     puts "PROJECT OPEN FAILED: $err"; exit 1
 }
 create_timing_netlist -model slow
+set_operating_conditions -model slow -temperature 0 -voltage 1100
 read_sdc
 update_timing_netlist
 # SKIP: a register pattern to leave out as a destination, for when one bus's

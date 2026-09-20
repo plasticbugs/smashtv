@@ -130,6 +130,7 @@ int main(int argc, char **argv) {
     dut->rst = 1; dut->bus_ack = 0; dut->int1 = dut->int2 = dut->dpyint = 0;
     for (int i = 0; i < 8; i++) tick();
     dut->rst = 0;
+    tick();     // the CPU registers its reset: let that clear before anything is poked below
 
     // ---- a warm start: the traces begin at some frame, not at reset, so the
     // RTL is given MAME's registers as of the first traced instruction and

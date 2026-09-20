@@ -73,7 +73,7 @@ module stv_blit (
 
     // ------------------------------------------------------------ the blit
     typedef enum logic [3:0] {
-        B_IDLE, B_S1, B_S2, B_S3, B_S4, B_S5, B_ROW, B_FETCH, B_PIX, B_END
+        B_IDLE, B_S1, B_S2, B_S2M, B_S3, B_S4, B_S5, B_ROW, B_FETCH, B_PIX, B_END
     } bst_t;
     bst_t bst;
 
@@ -139,7 +139,7 @@ module stv_blit (
     // once per blit; the operands are widened first so the product is not an
     // 18-bit one silently assigned to 36 bits.
     logic signed [17:0] nys;
-    logic signed [35:0] yskip;
+    logic signed [35:0] yskip, yskip_q;
     always_comb begin
         nys   = -ys;
         yskip = 36'(nys) * 36'(rb);
@@ -198,14 +198,22 @@ module stv_blit (
                     end else begin
                         rb  <= (rb + w + 18'sd3) & ~18'sd3;
                     end
-                    bst <= B_S3;
+                    bst <= B_S2M;
+                end
+
+                // The multiply gets a clock to itself: product and add in one
+                // was the last failing path in the core (-0.6 ns, cold).  One
+                // clock more per blit, against 41 ns a pixel.
+                B_S2M: begin
+                    yskip_q <= yskip;
+                    bst     <= B_S3;
                 end
 
                 // 4. clip in y
                 B_S3: begin
                     if (ys < 0) begin
                         h       <= h + ys;
-                        clipoff <= clipoff + 32'(yskip[31:0] <<< 3);
+                        clipoff <= clipoff + 32'(yskip_q[31:0] <<< 3);
                         ys      <= '0;
                     end else if (ys + h > 18'sd512) begin
                         h       <= 18'sd512 - ys;

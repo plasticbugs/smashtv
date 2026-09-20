@@ -84,7 +84,8 @@ module stv_sound (
     logic [2:0] rom_age;
     wire rom_wait = rom_want && (rom_age != 3'(SETTLE));
     wire last     = (phase == 6'd47);
-    wire stall    = last && rom_wait;
+    wire ym_wait  = sel_ym && !cpu_rnw && (ym_wr_pend || ym_wr_act);
+    wire stall    = last && (rom_wait || ym_wait);
 
     always_ff @(posedge clk)
         if (rst) phase <= 6'd0;
@@ -257,16 +258,26 @@ module stv_sound (
     );
 
     // ---------------- YM2151 ----------------
-    // A write is held until the chip has had an enable to see it: the E-high
-    // window is 24 clocks and cen_p1 comes every ~54.  Two writes are never
-    // closer than an instruction (>= 4 cycles, 192 clocks), so nothing queues.
-    logic       ym_wr_pend;
+    // jt51 advances on its enables and nowhere else, so the SDC gives the
+    // paths inside it two clocks - except that its register file takes a write
+    // on whatever clock the strobe is up.  So the strobe goes up on the clock
+    // AFTER a cen_p1 and stays up across exactly one more (jt51's busy flag
+    // samples it there): a register changes one clock after an enable and is
+    // next looked at some fifty clocks later.  A write is pending for up to
+    // one enable period before that and takes one more, 108 clocks at the
+    // outside; the 6809 cannot write twice in less than 192, but if it ever
+    // did, the second waits (ym_wait).
+    logic       ym_wr_pend, ym_wr_act, ym_rst;
     logic [7:0] ym_din_l;
     logic       ym_a0_l;
     always_ff @(posedge clk) begin
-        if (reset) ym_wr_pend <= 1'b0;
+        ym_rst <= reset | ~pia_ca2;
+        if (reset) begin ym_wr_pend <= 1'b0; ym_wr_act <= 1'b0; end
         else begin
-            if (ym_cen_p1) ym_wr_pend <= 1'b0;
+            if (ym_cen_p1) begin
+                if (ym_wr_act)       ym_wr_act <= 1'b0;
+                else if (ym_wr_pend) begin ym_wr_act <= 1'b1; ym_wr_pend <= 1'b0; end
+            end
             if (sel_ym && wr_now) begin
                 ym_wr_pend <= 1'b1;
                 ym_din_l   <= cpu_dout;
@@ -279,10 +290,10 @@ module stv_sound (
     wire signed [15:0] ym_left, ym_right;
 
     jt51 ym (
-        .rst(reset | ~pia_ca2), .clk(clk), .cen(ym_cen), .cen_p1(ym_cen_p1),
-        .cs_n(~(ym_wr_pend | (sel_ym & cpu_rnw & (phase >= 6'(SETTLE))))),
-        .wr_n(~ym_wr_pend),
-        .a0(ym_wr_pend ? ym_a0_l : cpu_addr[0]),
+        .rst(ym_rst), .clk(clk), .cen(ym_cen), .cen_p1(ym_cen_p1),
+        .cs_n(~(ym_wr_act | (sel_ym & cpu_rnw & (phase >= 6'(SETTLE))))),
+        .wr_n(~ym_wr_act),
+        .a0(ym_wr_act ? ym_a0_l : cpu_addr[0]),
         .din(ym_din_l), .dout(ym_dout),
         .ct1(), .ct2(), .irq_n(ym_irq_n), .sample(),
         .left(ym_left), .right(ym_right), .xleft(), .xright()

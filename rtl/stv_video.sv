@@ -164,8 +164,12 @@ module stv_video #(
     // -- which at two dots per pixel clock is a halving -- adds HEBLNK and
     // wraps (io_register_r in tms34010.cpp).
     wire [16:0] hc_raw = {8'd0, hdot[9:1]} + {1'b0, heblnk};
-    assign hcount_q = (hc_raw > {1'b0, htotal} + 17'd1)
-                    ? 16'(hc_raw - {1'b0, htotal} - 17'd1) : 16'(hc_raw);
+    // registered: an add, a compare and a subtract on the way to the CPU's
+    // read multiplexer was a failing path, and a value that moves every
+    // twelve clocks loses nothing by being one clock old
+    always_ff @(posedge clk)
+        hcount_q <= (hc_raw > {1'b0, htotal} + 17'd1)
+                  ? 16'(hc_raw - {1'b0, htotal} - 17'd1) : 16'(hc_raw);
     assign vcount_q = {7'd0, vline};
 
     assign hdot_o = hdot;

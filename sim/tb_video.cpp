@@ -217,6 +217,45 @@ int main(int argc, char **argv) {
     dut->gfx_we = 0;
     tick();
 
+    // ---- the CPU's port on its own, before it is trusted to load a state.
+    // A different word in every location of a row in each kind of storage -
+    // block RAM, the template rows (their own RAMs, their own port), and the
+    // rows in SDRAM - written and read back through both planes.  The state
+    // load's own read-back cannot see a read that returns the wrong COLUMN,
+    // because the template rows of every captured state are one colour from
+    // end to end; that is how a broken template read got past this gate once
+    // (the game's RAM test found it: RAM CHIPS BAD).
+    {
+        const int rows[] = {0, 5, 255, 256, 300, 509, 510, 511};
+        long bad = 0, n = 0;
+        dut->ctrl = 0x30;                 // bank 1, autoerase off
+        for (int r : rows)
+            for (int c = 0; c < FB_COLS / 2; c++) {
+                uint32_t w = uint32_t(r * (FB_COLS / 2) + c);
+                uint16_t pix = uint16_t(w * 0x9E37u + 0x1234u), pal = uint16_t(w * 0x6A09u + 0x0777u);
+                blit_reg(8, pal);
+                cpu_write(w, pix, 3);
+            }
+        for (int pass = 0; pass < 2; pass++) {
+            dut->ctrl = pass ? 0x10 : 0x30; tick();     // the palette plane, then... the pixel plane first
+            for (int r : rows)
+                for (int c = 0; c < FB_COLS / 2; c++) {
+                    uint32_t w = uint32_t(r * (FB_COLS / 2) + c);
+                    uint16_t want = pass ? uint16_t(w * 0x6A09u + 0x0777u) : uint16_t(w * 0x9E37u + 0x1234u);
+                    uint16_t got = cpu_read(w);
+                    n++;
+                    if (got != want) {
+                        if (bad < 8) printf("  port: row %d word %d %s got %04x want %04x\n", r, c,
+                                            pass ? "palette" : "pixel", got, want);
+                        bad++;
+                    }
+                }
+        }
+        printf("CPU port: %ld of %ld words wrong across block RAM, template and SDRAM rows\n", bad, n);
+        if (bad) { printf("FAIL  the CPU's port into the frame buffer\n"); return 1; }
+        dut->ctrl = 0x30; tick();
+    }
+
     // ---- load the frame buffer, both planes at once, with the video bank set
     dut->ctrl = 0x30;                 // bank 1, autoerase off
     for (int w = 0; w < FB_ROWS * FB_COLS / 2; w++) {

@@ -81,6 +81,13 @@ module tms34010 #(
     output logic [31:0] dbg_pc,
     output logic        unimpl          // sticky: met something not built
 );
+    // The reset, registered here.  It reaches every register below and the
+    // DSP block's input registers, and from core_top's one register that was
+    // a long wire (-0.3 ns in the sixth compile).  It is held for thousands of
+    // clocks, so a clock more is nothing.
+    logic rst_q;
+    always_ff @(posedge clk) rst_q <= rst;
+
     // ---- stepping (see STEP above)
     // A step needs STEP clocks since the last one - that is all the SDC's
     // three-clock paths rely on - and, while a bus request is out, the ack:
@@ -781,7 +788,7 @@ module tms34010 #(
     wire io_hit = (bus_addr[31:9] == 23'h600000);          // 0xC0000000..0xC00001FF
     wire [4:0] io_reg = bus_addr[8:4];
 
-    always_ff @(posedge clk) if (step || rst) begin
+    always_ff @(posedge clk) if (step || rst_q) begin
         w_en = 1'b0; w_f = 1'b0; w_i = 4'd0; w_v = 32'd0;
         w2_en = 1'b0; w2_f = 1'b0; w2_i = 4'd0; w2_v = 32'd0;
         insn_start_q <= 1'b0;
@@ -794,7 +801,7 @@ module tms34010 #(
 
         cyc_stb <= 1'b0;
 
-        if (rst) begin
+        if (rst_q) begin
             state <= S_RESET; st <= 32'h0000_0010; pc <= '0; sp <= '0;
             for (int i = 0; i < 15; i++) begin ra[i] <= '0; rb[i] <= '0; end
             io_control <= '0; io_convsp <= '0; io_convdp <= '0; io_psize <= '0;
@@ -1418,12 +1425,12 @@ module tms34010 #(
         endcase
 
         // the register file's two write ports
-        if (!rst && w_en) begin
+        if (!rst_q && w_en) begin
             if (w_i == 4'd15) sp <= w_v;
             else if (w_f)     rb[w_i] <= w_v;
             else              ra[w_i] <= w_v;
         end
-        if (!rst && w2_en) begin
+        if (!rst_q && w2_en) begin
             if (w2_i == 4'd15) sp <= w2_v;
             else if (w2_f)     rb[w2_i] <= w2_v;
             else               ra[w2_i] <= w2_v;
@@ -1440,7 +1447,7 @@ module tms34010 #(
     // to count every `cen`; and the two pulses for the benches, cut to one
     // clock each.
     always_ff @(posedge clk) begin
-        if (rst) begin
+        if (rst_q) begin
             stepcnt <= '0; q_ack <= 1'b0; dpy_l <= 1'b0; bal <= '0; cyc_total <= '0;
         end else begin
             stepcnt <= step ? 2'd0 : (stepcnt == 2'(STEP - 1)) ? stepcnt : stepcnt + 2'd1;

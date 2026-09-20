@@ -215,11 +215,23 @@ module smashtv_mem (
         if (c_ack[2]) sc_q <= rdata;
     end
 
-    assign c_addr[3]  = XM_W | {7'd0, xm_addr};
-    assign c_req[3]   = xm_req && !xm_ack;
-    assign c_we[3]    = xm_we;
-    assign c_wdata[3] = xm_d;
-    assign c_be[3]    = xm_be;
+    // Frame-buffer rows 256-509.  The request is registered here: it comes
+    // straight out of the blitter's pixel logic (source word -> transparency
+    // -> row test -> request), and unregistered that ran on through the
+    // arbiter to the SDRAM's address pins, -1.9 ns in the sixth compile.
+    logic        xq_req, xq_we;
+    logic [16:0] xq_addr;
+    logic [15:0] xq_d;
+    logic  [1:0] xq_be;
+    always_ff @(posedge clk) begin
+        xq_req  <= xm_req && !xm_ack && !c_ack[3] && !init;
+        xq_we   <= xm_we; xq_addr <= xm_addr; xq_d <= xm_d; xq_be <= xm_be;
+    end
+    assign c_addr[3]  = XM_W | {7'd0, xq_addr};
+    assign c_req[3]   = xq_req && !xm_ack;
+    assign c_we[3]    = xq_we;
+    assign c_wdata[3] = xq_d;
+    assign c_be[3]    = xq_be;
     always_ff @(posedge clk) begin
         xm_ack <= c_ack[3];
         if (c_ack[3]) xm_q <= rdata;
@@ -253,14 +265,25 @@ module smashtv_mem (
     logic [15:0] b_data;
     logic [18:0] b_start;
 
-    wire         want    = gfx_req && !gfx_ack;
-    wire  [18:0] ahead   = gfx_addr - ra_base;      // how far past the head
+    // The request is registered on the way in (it comes from the far side of
+    // the chip, and the window arithmetic below is deep enough without the
+    // journey).  `serve` keeps the registered copy from outliving its answer
+    // by a clock, when the head has already moved on.
+    logic        want;
+    logic [18:0] g_addr;
+    wire         serve;
+    always_ff @(posedge clk) begin
+        want   <= gfx_req && !gfx_ack && !serve && !init;
+        g_addr <= gfx_addr;
+    end
+    wire  [18:0] ahead   = g_addr - ra_base;        // how far past the head
     wire         in_fifo = ra_valid && (ahead < {13'd0, ra_cnt});
     // ...or on its way: the running burst stops at ra_stop
     wire         coming  = ra_valid && (rs == R_RUN) && (ahead < (ra_stop - ra_base));
     wire         miss    = want && !in_fifo && !coming;
     wire         push    = b_wr && b_idx[0] && (rs == R_RUN);
     wire         pop     = want && in_fifo;         // serve the head or skip it
+    assign       serve   = pop && (ahead == 19'd0);
 
     always_ff @(posedge clk) begin
         gfx_ack <= 1'b0;
@@ -275,7 +298,7 @@ module smashtv_mem (
                 ra_fill <= ra_fill + 19'd1;
             end
             if (pop) begin
-                if (ahead == 19'd0) begin gfx_q <= ra_mem[ra_rp]; gfx_ack <= 1'b1; end
+                if (serve) begin gfx_q <= ra_mem[ra_rp]; gfx_ack <= 1'b1; end
                 ra_rp   <= ra_rp + 5'd1;
                 ra_base <= ra_base + 19'd1;
             end
@@ -286,8 +309,8 @@ module smashtv_mem (
                     if (miss) begin
                         // start again at the request
                         ra_valid <= 1'b1; ra_cnt <= '0; ra_rp <= '0; ra_wp <= '0;
-                        ra_base <= gfx_addr; ra_fill <= gfx_addr;
-                        b_start <= gfx_addr; ra_stop <= gfx_addr + 19'd8;
+                        ra_base <= g_addr; ra_fill <= g_addr;
+                        b_start <= g_addr; ra_stop <= g_addr + 19'd8;
                         rs <= R_RUN;
                     end else if (ra_valid && ra_cnt <= 6'd24 && !dl_active) begin
                         b_start <= ra_fill; ra_stop <= ra_fill + 19'd8;

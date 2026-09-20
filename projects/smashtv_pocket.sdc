@@ -93,11 +93,11 @@ set_false_path -from [get_ports {cram0_dq[*] cram1_dq[*] cram0_wait cram1_wait}]
 # (-9.1 ns of slack at 96 MHz before this).  So a path between two of those
 # registers has three clocks.  The registers that see EVERY clock are the ones
 # listed in CPU_FAST and are left at one: the step counter, the bus
-# handshake's latched ack and data, the held display-interrupt pulse and the
-# cycle balance.  If a register is added to the every-clock block at the end
+# handshake's latched ack and data, the held display-interrupt pulse, the
+# cycle balance and the local copy of reset.  If a register is added to the every-clock block at the end
 # of tms34010.sv it MUST be added here, or it is given time it does not have.
 set CPU_ALL  [get_registers {*|tms34010:u_cpu|*}]
-set CPU_FAST [get_registers {*|tms34010:u_cpu|stepcnt[*] *|tms34010:u_cpu|q_ack *|tms34010:u_cpu|q_rdata[*] *|tms34010:u_cpu|dpy_l *|tms34010:u_cpu|bal[*]}]
+set CPU_FAST [get_registers {*|tms34010:u_cpu|stepcnt[*] *|tms34010:u_cpu|q_ack *|tms34010:u_cpu|q_rdata[*] *|tms34010:u_cpu|dpy_l *|tms34010:u_cpu|bal[*] *|tms34010:u_cpu|rst_q}]
 set CPU_STEP [remove_from_collection $CPU_ALL $CPU_FAST]
 set_multicycle_path -setup 3 -from $CPU_STEP -to $CPU_STEP
 set_multicycle_path -hold  2 -from $CPU_STEP -to $CPU_STEP
@@ -128,3 +128,17 @@ set_multicycle_path -setup $SND_MC -from $SND_CPU -to $SND_EXT
 set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to $SND_EXT
 set_multicycle_path -setup $SND_MC -from $SND_CPU -to $SND_ROMC
 set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to $SND_ROMC
+
+# The YM2151 (modules/sound-jt51).  Every register in it is enabled by cen or
+# cen_p1, 26 and 54 clocks apart, except its register file, which takes a
+# write on any clock the strobe is up - and rtl/stv_sound.sv raises the strobe
+# on the clock after a cen_p1 for that reason.  Two clocks.
+set YM [get_registers {*|stv_sound:u_snd|jt51:ym|*}]
+set_multicycle_path -setup 2 -from $YM -to $YM
+set_multicycle_path -hold  1 -from $YM -to $YM
+
+# The bring-up panel's "first sound ROM byte" latch is fed through the byte
+# select, which is the 6809's address bit 0: one of the 6809's four-clock paths
+# that happens to end in core_top.
+set_multicycle_path -setup $SND_MC -from $SND_CPU -to [get_registers {ic|first_snd[*]}]
+set_multicycle_path -hold  [expr {$SND_MC - 1}] -from $SND_CPU -to [get_registers {ic|first_snd[*]}]
