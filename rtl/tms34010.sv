@@ -39,7 +39,20 @@ module tms34010 #(
     // The bench answers every read from MAME's own bus trace, including reads
     // of the interrupt-pending register, so that a program polling it sees
     // what MAME's did.  In the machine the CPU answers those itself.
-    parameter bit IO_READ_FROM_BUS = 1'b0
+    parameter bit IO_READ_FROM_BUS = 1'b0,
+    // The state machine below advances on one clock in STEP.  Its execute
+    // state goes from the instruction register through the register file and
+    // the ALU, the shifter or the divider and back into the register file,
+    // which is about 19.5 ns of logic in this part (measured: -9.1 ns of
+    // slack at 96 MHz with STEP 1).  Nothing needs it to be faster - the
+    // pacing below makes the CPU wait out most of its clocks anyway - so
+    // every register of the machine proper is enabled by `step`, and the SDC
+    // gives the paths among them STEP clocks.  What must see every clock -
+    // the bus handshake, the display interrupt's pulse, the cycle account -
+    // is in the small every-clock block at the end, and is NOT in that
+    // constraint.  projects/smashtv_pocket.sdc has the register lists; keep
+    // them in step with the two blocks.
+    parameter int STEP = 3
 ) (
     input  logic        clk,
     input  logic        rst,
@@ -68,6 +81,20 @@ module tms34010 #(
     output logic [31:0] dbg_pc,
     output logic        unimpl          // sticky: met something not built
 );
+    // ---- stepping (see STEP above)
+    // A step needs STEP clocks since the last one - that is all the SDC's
+    // three-clock paths rely on - and, while a bus request is out, the ack:
+    // the machine does nothing but wait for it, so rather than look every
+    // third clock it steps the clock after the ack is in.
+    logic  [1:0] stepcnt;
+    logic        q_req;                         // the machine's request
+    logic        q_ack;                         // an ack it has not seen yet
+    wire         step  = (stepcnt == 2'(STEP - 1)) && !(q_req && !q_ack);
+    wire         first = (stepcnt == 2'd0);     // the clock after a step
+    logic [15:0] q_rdata;
+    logic        dpy_l;                         // a display interrupt it has not seen yet
+    logic        insn_start_q, irq_taken_q;
+
     // ------------------------------------------------------------ state
     logic [31:0] ra [15] /* verilator public_flat_rw @(posedge clk) */;   // A0..A14
     logic [31:0] rb [15] /* verilator public_flat_rw @(posedge clk) */;   // B0..B14
@@ -736,37 +763,43 @@ module tms34010 #(
     // A macro, not a task: a task that writes module state is something a
     // synthesiser has to interpret (METHODOLOGY 5.13 lost results that way),
     // and a macro is just the text.
-`define SET_REG(f, i, v) \
-    begin \
-        if ((i) == 4'd15) sp <= (v); \
-        else if (f)       rb[(i)] <= (v); \
-        else              ra[(i)] <= (v); \
-    end
+// Writes to the register file go through ONE port (and a second, for the three
+// instructions that write a pair: MMFM, the 64-bit multiplies and divides).
+// Each site used to assign ra[i]/rb[i] itself, which makes every one of the 31
+// registers' inputs a multiplexer over all thirty sites - about a quarter of
+// this CPU's logic when it was measured.  Now the sites set these, the last
+// one to run in a clock wins as before, and the file is written once, at the
+// foot of the block.  They are blocking temporaries, not state.
+`define SET_REG(f, i, v)  begin w_en  = 1'b1; w_f  = (f); w_i  = (i); w_v  = (v); end
+`define SET_REG2(f, i, v) begin w2_en = 1'b1; w2_f = (f); w2_i = (i); w2_v = (v); end
+    /* verilator lint_off BLKSEQ */
+    logic        w_en, w_f, w2_en, w2_f;
+    logic  [3:0] w_i, w2_i;
+    logic [31:0] w_v, w2_v;
 
     // a bus write the CPU makes to one of its own I/O registers
     wire io_hit = (bus_addr[31:9] == 23'h600000);          // 0xC0000000..0xC00001FF
     wire [4:0] io_reg = bus_addr[8:4];
 
-    always_ff @(posedge clk) begin
-        insn_start <= 1'b0;
-        irq_taken  <= 1'b0;
+    always_ff @(posedge clk) if (step || rst) begin
+        w_en = 1'b0; w_f = 1'b0; w_i = 4'd0; w_v = 32'd0;
+        w2_en = 1'b0; w2_f = 1'b0; w2_i = 4'd0; w2_v = 32'd0;
+        insn_start_q <= 1'b0;
+        irq_taken_q  <= 1'b0;
 
         // interrupt pending bits: the pins are levels, the display is a pulse
         io_intpend[1] <= int1;
         io_intpend[2] <= int2;
-        if (dpyint) io_intpend[10] <= 1'b1;
+        if (dpy_l) io_intpend[10] <= 1'b1;
 
         cyc_stb <= 1'b0;
-        if (cyc_stb) cyc_total <= cyc_total + {16'd0, cyc_add};
-        bal <= bal + (cyc_stb ? $signed({12'd0, cyc_add}) : 28'sd0)
-                   - ((cen && bal > CREDIT) ? 28'sd1 : 28'sd0);
 
         if (rst) begin
             state <= S_RESET; st <= 32'h0000_0010; pc <= '0; sp <= '0;
             for (int i = 0; i < 15; i++) begin ra[i] <= '0; rb[i] <= '0; end
             io_control <= '0; io_convsp <= '0; io_convdp <= '0; io_psize <= '0;
             io_pmask <= '0; io_intenb <= '0; io_intpend <= '0; io_srt <= 1'b0; bus_srt <= 1'b0;
-            bus_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; bal <= '0; cyc_total <= '0; cyc_stb <= 1'b0; ext_seen <= 1'b0;
+            q_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; cyc_stb <= 1'b0; ext_seen <= 1'b0;
             push_st_too <= 1'b0;
         end else case (state)
             // ------------------------------------------------ reset
@@ -783,14 +816,14 @@ module tms34010 #(
                 if (irq_any) begin
                     state <= S_IRQ;
                 end else begin
-                    insn_start <= 1'b1;
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
+                    insn_start_q <= 1'b1;
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
                     state <= S_DECODE;
                 end
             end
-            S_DECODE: if (bus_ack) begin
-                bus_req <= 1'b0;
-                ir      <= bus_rdata;
+            S_DECODE: if (q_ack) begin
+                q_req <= 1'b0;
+                ir      <= q_rdata;
                 pc      <= pc + 32'd16;
                 ext_i   <= 3'd0;
                 state   <= S_EXT;
@@ -800,11 +833,11 @@ module tms34010 #(
                 if (ext_i == 3'd0 && !ext_seen) begin cyc_add <= {10'd0, cyc}; cyc_stb <= 1'b1; ext_seen <= 1'b1; end
                 if (ext_i == next) begin
                     state <= S_EXEC;
-                end else if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0;
-                    ext[ext_i[1:0]] <= bus_rdata;
+                end else if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
+                end else if (q_ack) begin
+                    q_req <= 1'b0;
+                    ext[ext_i[1:0]] <= q_rdata;
                     pc    <= pc + 32'd16;
                     ext_i <= ext_i + 3'd1;
                 end
@@ -812,7 +845,7 @@ module tms34010 #(
 
             // ------------------------------------------------ interrupt entry
             S_IRQ: begin
-                irq_taken   <= 1'b1;
+                irq_taken_q   <= 1'b1;
                 vec_addr    <= irq_vec;
                 push_st_too <= 1'b1;
                 ret_pc      <= pc;
@@ -1068,25 +1101,25 @@ module tms34010 #(
             // Fetched only when the jump is taken, and without moving the PC:
             // MAME's PARAM_WORD_NO_INC and PARAM_LONG_NO_INC.
             S_JREAD: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0;
-                    ext[0]  <= bus_rdata;
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
+                end else if (q_ack) begin
+                    q_req <= 1'b0;
+                    ext[0]  <= q_rdata;
                     if ((kind == K_JCC && ir[7:0] == 8'h80) || kind == K_CALLA)
                         state <= S_JREAD2;
                     else begin
-                        pc <= pc + {{12{bus_rdata[15]}}, bus_rdata, 4'd0} + 32'd16;
+                        pc <= pc + {{12{q_rdata[15]}}, q_rdata, 4'd0} + 32'd16;
                         state <= S_DONE;
                     end
                 end
             end
             S_JREAD2: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4] + 28'd1;
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0;
-                    pc      <= {bus_rdata, ext[0][15:4], 4'd0};
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4] + 28'd1;
+                end else if (q_ack) begin
+                    q_req <= 1'b0;
+                    pc      <= {q_rdata, ext[0][15:4], 4'd0};
                     state   <= S_DONE;
                 end
             end
@@ -1123,7 +1156,7 @@ module tms34010 #(
                 if (4'(5'd16 - mm_i) == rd) `SET_REG(fR, rd, fe_rdata + 32'd32)
                 else begin
                     `SET_REG(fR, 4'(5'd16 - mm_i), fe_rdata)
-                    `SET_REG(fR, rd, r_d + 32'd32)
+                    `SET_REG2(fR, rd, r_d + 32'd32)
                 end
                 state <= S_MM_NEXT;
             end
@@ -1137,7 +1170,7 @@ module tms34010 #(
                 if (rd[0]) `SET_REG(fR, rd, mul_p[31:0])
                 else begin
                     `SET_REG(fR, rd, mul_p[63:32])
-                    `SET_REG(fR, rd | 4'd1, mul_p[31:0])
+                    `SET_REG2(fR, rd | 4'd1, mul_p[31:0])
                 end
                 state <= S_DONE;
             end
@@ -1173,7 +1206,7 @@ module tms34010 #(
                         if (kind == K_MODS) st[ST_N] <= div_rem[31];
                     end else begin
                         `SET_REG(fR, rd, div_qs[31:0])
-                        if (div_wide) `SET_REG(fR, rd | 4'd1, div_rem)
+                        if (div_wide) `SET_REG2(fR, rd | 4'd1, div_rem)
                         st[ST_Z] <= (div_qs[31:0] == 32'd0);
                         if (kind == K_DIVS) st[ST_N] <= div_qs[31];
                     end
@@ -1201,11 +1234,11 @@ module tms34010 #(
                 end
             end
             S_PIX_SRT: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_srt <= 1'b1; bus_addr <= t_a[31:4];
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0; bus_srt <= 1'b0;
-                    srt_val <= bus_rdata;
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_srt <= 1'b1; bus_addr <= t_a[31:4];
+                end else if (q_ack) begin
+                    q_req <= 1'b0; bus_srt <= 1'b0;
+                    srt_val <= q_rdata;
                     state   <= S_PIX_WR;
                 end
             end
@@ -1254,10 +1287,10 @@ module tms34010 #(
                 state <= g_fill ? G_SEG : G_ROWSRC;
             end
             G_ROWSRC, G_SRCRD: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_sword;
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0; g_srcw <= bus_rdata; g_sword <= g_sword + 28'd1;
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_sword;
+                end else if (q_ack) begin
+                    q_req <= 1'b0; g_srcw <= q_rdata; g_sword <= g_sword + 28'd1;
                     state <= (state == G_ROWSRC) ? G_SEG
                            : (g_cnt == 5'd0)     ? G_WRDST : G_PIX;
                 end
@@ -1280,10 +1313,10 @@ module tms34010 #(
                 endcase
             end
             G_RDDST: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_dword;
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0; g_dstw <= bus_rdata; state <= G_PIX;
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_dword;
+                end else if (q_ack) begin
+                    q_req <= 1'b0; g_dstw <= q_rdata; state <= G_PIX;
                 end
             end
             G_PIX: begin
@@ -1295,10 +1328,10 @@ module tms34010 #(
                 else if (g_cnt == 5'd1)         state <= G_WRDST;
             end
             G_WRDST: begin
-                if (!bus_req) begin
-                    bus_req <= 1'b1; bus_we <= 1'b1; bus_addr <= g_dword; bus_wdata <= g_dstw;
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0; g_dword <= g_dword + 28'd1;
+                if (!q_req) begin
+                    q_req <= 1'b1; bus_we <= 1'b1; bus_addr <= g_dword; bus_wdata <= g_dstw;
+                end else if (q_ack) begin
+                    q_req <= 1'b0; g_dword <= g_dword + 28'd1;
                     if (g_seg == 2'd0)      g_seg <= 2'd1;
                     else if (g_seg == 2'd1) g_fwc <= g_fwc - 16'd1;
                     state <= (g_seg == 2'd2) ? G_ROWEND : G_SEG;
@@ -1326,17 +1359,17 @@ module tms34010 #(
             S_FE_BUS: begin
                 if (!fe_now[3]) begin
                     state <= fe_ret;
-                end else if (!bus_req) begin
-                    bus_req   <= 1'b1;
+                end else if (!q_req) begin
+                    q_req   <= 1'b1;
                     bus_we    <= fe_now[2];
                     bus_addr  <= fe_base + {26'd0, fe_now[1:0]};
                     bus_wdata <= fe_new[16 * fe_now[1:0] +: 16];
-                end else if (bus_ack) begin
-                    bus_req <= 1'b0;
+                end else if (q_ack) begin
+                    q_req <= 1'b0;
                     if (!fe_now[2]) begin
                         // a read of one of the CPU's own I/O registers comes
                         // from the CPU, whatever the bus says
-                        fe_w[fe_now[1:0]] <= (!io_hit || IO_READ_FROM_BUS) ? bus_rdata
+                        fe_w[fe_now[1:0]] <= (!io_hit || IO_READ_FROM_BUS) ? q_rdata
                                            : (io_reg == IO_INTENB)  ? io_intenb
                                            : (io_reg == IO_INTPEND) ? io_intpend
                                            : (io_reg == IO_CONTROL) ? io_control
@@ -1344,7 +1377,7 @@ module tms34010 #(
                                            : (io_reg == IO_CONVDP)  ? io_convdp
                                            : (io_reg == IO_PSIZE)   ? io_psize
                                            : (io_reg == IO_PMASK)   ? io_pmask
-                                           :                          bus_rdata;
+                                           :                          q_rdata;
                     end else if (io_hit) begin
                         case (io_reg)
                             IO_DPYCTL:  io_srt     <= bus_wdata[11];
@@ -1367,17 +1400,67 @@ module tms34010 #(
             end
 
             // ------------------------------------------------ pace
+            // ...and, the moment nothing is owed, begin the next instruction
+            // here rather than spend a step getting to S_FETCH to do it
             S_DONE: begin
                 push_st_too <= 1'b0;
                 ext_seen <= 1'b0;
-                if (bal <= 28'sd0) state <= S_FETCH;
+                if (bal <= 28'sd0) begin
+                    if (irq_any) state <= S_IRQ;
+                    else begin
+                        insn_start_q <= 1'b1;
+                        q_req <= 1'b1; bus_we <= 1'b0; bus_addr <= pc[31:4];
+                        state <= S_DECODE;
+                    end
+                end
             end
             default: state <= S_RESET;
         endcase
+
+        // the register file's two write ports
+        if (!rst && w_en) begin
+            if (w_i == 4'd15) sp <= w_v;
+            else if (w_f)     rb[w_i] <= w_v;
+            else              ra[w_i] <= w_v;
+        end
+        if (!rst && w2_en) begin
+            if (w2_i == 4'd15) sp <= w2_v;
+            else if (w2_f)     rb[w2_i] <= w2_v;
+            else               ra[w2_i] <= w2_v;
+        end
     end
+    /* verilator lint_on BLKSEQ */
+
+    // ------------------------------------------------ what sees every clock
+    // `step`; the bus handshake (an ack is a one-clock pulse and may come on
+    // any clock: it is latched with its data, the request to the outside
+    // drops at once so the far side does not take it for a second one, and
+    // the machine picks both up at its next step); the display interrupt's
+    // pulse, held for the machine the same way; the cycle account, which has
+    // to count every `cen`; and the two pulses for the benches, cut to one
+    // clock each.
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            stepcnt <= '0; q_ack <= 1'b0; dpy_l <= 1'b0; bal <= '0; cyc_total <= '0;
+        end else begin
+            stepcnt <= step ? 2'd0 : (stepcnt == 2'(STEP - 1)) ? stepcnt : stepcnt + 2'd1;
+            if (bus_req && bus_ack) begin q_ack <= 1'b1; q_rdata <= bus_rdata; end
+            else if (step)          q_ack <= 1'b0;      // the machine has seen it
+            if (dpyint)    dpy_l <= 1'b1;
+            else if (step) dpy_l <= 1'b0;
+            // a charge is added once, on the step that ends the period it was up for
+            if (step && cyc_stb) cyc_total <= cyc_total + {16'd0, cyc_add};
+            bal <= bal + ((step && cyc_stb) ? $signed({12'd0, cyc_add}) : 28'sd0)
+                       - ((cen && bal > CREDIT) ? 28'sd1 : 28'sd0);
+        end
+    end
+    assign bus_req    = q_req && !q_ack;
+    assign insn_start = insn_start_q && first;
+    assign irq_taken  = irq_taken_q  && first;
 
     wire _unused = &{1'b0, mul_p[65:64], 1'b0};
 endmodule
 
 `undef SET_REG
+`undef SET_REG2
 `default_nettype wire

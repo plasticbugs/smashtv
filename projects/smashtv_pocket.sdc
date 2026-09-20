@@ -46,7 +46,7 @@ set_multicycle_path -setup 2 -from [get_clocks {dram_clk}] -to [get_registers {*
 set_multicycle_path -setup 3 -from [get_registers {*|sdram_ctrl:*|last[*]}] -to [get_registers {*|sdram_ctrl:*|*}]
 set_multicycle_path -hold  2 -from [get_registers {*|sdram_ctrl:*|last[*]}] -to [get_registers {*|sdram_ctrl:*|*}]
 
-# The pixel hand-over to the 6.857 MHz video clock. The dot enable's phase is
+# The pixel hand-over to the 8 MHz video clock. The dot enable's phase is
 # pinned to clk_vid (core_top.sv's pix_sync into clk_enables.sv), so the
 # colour and sync registers are launched a fixed number of system clocks
 # before the clk_vid edge that samples them, and the setup check starts from
@@ -85,3 +85,19 @@ set_false_path -from [get_ports {cram0_dq[*] cram1_dq[*] cram0_wait cram1_wait}]
 #   set_multicycle_path -setup 4 -from $M68K -to $M68K
 #   set_multicycle_path -hold  3 -from $M68K -to $M68K
 # ------------------------------------------------------------------------------
+
+# The TMS34010 (rtl/tms34010.sv, parameter STEP = 3).  Its state machine - the
+# register file, the status register, the instruction register, every counter
+# and scratch register of the execute states - is enabled on one clock in
+# three, because its execute state is about 19.5 ns of logic in this part
+# (-9.1 ns of slack at 96 MHz before this).  So a path between two of those
+# registers has three clocks.  The registers that see EVERY clock are the ones
+# listed in CPU_FAST and are left at one: the step counter, the bus
+# handshake's latched ack and data, the held display-interrupt pulse and the
+# cycle balance.  If a register is added to the every-clock block at the end
+# of tms34010.sv it MUST be added here, or it is given time it does not have.
+set CPU_ALL  [get_registers {*|tms34010:u_cpu|*}]
+set CPU_FAST [get_registers {*|tms34010:u_cpu|stepcnt[*] *|tms34010:u_cpu|q_ack *|tms34010:u_cpu|q_rdata[*] *|tms34010:u_cpu|dpy_l *|tms34010:u_cpu|bal[*]}]
+set CPU_STEP [remove_from_collection $CPU_ALL $CPU_FAST]
+set_multicycle_path -setup 3 -from $CPU_STEP -to $CPU_STEP
+set_multicycle_path -hold  2 -from $CPU_STEP -to $CPU_STEP
