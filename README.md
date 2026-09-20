@@ -11,13 +11,13 @@ MC1408) alongside. The gateware here is **not finished** — see Status.
 | board part | implementation | verified by |
 |---|---|---|
 | TMS34010 @ 40 MHz ÷ 8 | *not written* | — |
-| Williams DMA blitter | *not written* | — |
-| frame buffer + scanout | *not written* | — |
+| Williams DMA blitter | `tools/render_model.py` (reference model only) | pixel-identical to MAME over 76 frames in 8 windows |
+| frame buffer + scanout | `tools/render_model.py` (reference model only) | the same 8 windows, and byte-identical frame buffers at the end of each |
 | MC6809E @ 2 MHz | *not vendored yet* | — |
 | YM2151 @ 3.579545 MHz | *not vendored yet* | — |
 | HC-55516 CVSD | *not written* | — |
 | 6821 PIA | *not written* | — |
-| ROM | Pocket SDRAM (`target/pocket/smashtv_mem.sv`) | *layout not set yet* |
+| ROM | Pocket SDRAM (`target/pocket/smashtv_mem.sv`) | `sim/run_mem.sh`: 1,114,112 words at the loader's real rate; image byte-identical to MAME's |
 
 One row per part of the board. The right-hand column is the point of the
 table: it says **"—"** where nothing verifies it, not nothing.
@@ -36,11 +36,36 @@ Proven, and by what:
   marked as measured, with the window it was measured over.
 - MAME runs this romset headless and deterministically through
   `tools/mame.sh`, which is the oracle everything later is checked against.
+- **The ROM image.** `tools/verify_rom.py` proves all three regions
+  byte-identical to what MAME hands the chips, including all 1,572,864
+  decoded graphics pixels, and it catches a flipped bit in any plane, a
+  swapped plane pair and a non-zero pad byte.
+- **The Pocket memory path.** `sim/run_mem.sh` pushes the real image through
+  the download port at the loader's rate — a byte per 8 clocks, strobe held 4
+  — and reads all 1,114,112 words back through the core's ports: none wrong.
+- **The reference renderer** (`tools/render_model.py`) is pixel-identical to
+  MAME on every frame of eight captured windows spanning the power-up RAM
+  test, the CPU drawing text, the ROM check, a screen clear, the title, the
+  attract mode and two of gameplay — and its frame buffer is byte-identical
+  to MAME's at the end of each. `tools/teeth_video.py` shows the gate
+  catching a wrong pen map, a wrong plane order, a one-row scanout error, a
+  wrong flip and the wrong frame-buffer plane.
 
 Not proven:
 
-- Everything else. There is no CPU, no blitter, no video and no sound in the
-  gateware yet.
+- **There is no gateware for this machine yet.** No CPU, no blitter, no
+  video, no sound. Everything in the table above with an implementation is
+  Python, not RTL.
+- Three parts of the video model are **unverified rather than correct**: the
+  autoerase lag (±1 raster line makes no difference to any captured frame),
+  which of the two template rows a row is erased from (the game keeps them
+  identical, so the parity is unobservable), and autoerase being present at
+  all (worth only 171 pixels across the whole capture set). See
+  `tools/teeth_video.py`.
+- Two blitter command bits are followed rather than understood: bit 5
+  ("flip y") and bit 11. MAME ignores both; so does the model, and the
+  captures agree with MAME on all 76 frames — which means the game does not
+  depend on them, not that they do nothing. `docs/hardware.md` section 10.
 
 ## Building the ROM image
 
@@ -65,12 +90,21 @@ only — a couple of minutes, and it catches what Verilator cannot.
 ## Checking it
 
 ```sh
-sim/lint.sh          # every module on its own
-sim/run_mem.sh       # the Pocket's memory path, at the loader's real rate
+sim/lint.sh                 # every module on its own
+sim/run_mem.sh              # the Pocket's memory path, at the loader's real rate
+
+tools/shadow_romset.sh      # once: the romset under the names MAME 0.288 wants
+REGION_DIR=/tmp/r tools/mame.sh -seconds_to_run 2 \
+    -autoboot_script tools/dump_regions.lua
+tools/verify_rom.py /tmp/smashtv.rom /tmp/r    # the image against MAME
+
+tools/dump_states.sh        # capture the reference states and traces (~20 s)
+tools/regress_video.sh      # the renderer against MAME: zero pixels or fail
+tools/teeth_video.py        # what that gate can and cannot catch
 ```
 
-Add the core's own gates here as they come to exist: the reference renderer
-against MAME, the RTL against the renderer, the whole machine, the sound.
+Add the core's own gates here as they come to exist: the RTL against the
+renderer, the whole machine, the sound.
 
 ## Credits
 

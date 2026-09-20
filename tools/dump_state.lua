@@ -1,81 +1,141 @@
--- Freeze the whole video state of smashtv at chosen frames, plus MAME's own
--- picture of the same frame, so tools/render_model.py can be held to it pixel
--- for pixel and the RTL can be loaded with it.
+-- Freeze smashtv's video state, then record everything that touches the
+-- picture for a run of frames, so tools/render_model.py can reproduce MAME's
+-- output frame by frame and the RTL can be held to the same trace.
 --
---   DUMPFRAMES=1000,2000 DUMP_DIR=... tools/mame.sh -seconds_to_run 40 \
+--   DUMP_DIR=... FROM=1500 COUNT=8 tools/mame.sh -seconds_to_run 40 \
 --       -autoboot_script tools/dump_state.lua
 --
--- One binary file per frame, little-endian throughout:
+-- Why a trace and not one frozen frame: this game races the beam.  Autoerase
+-- is turned on part-way down the picture, so rows 134-251 are wiped as they
+-- are scanned out and redrawn before the beam comes round again -- there is no
+-- instant at which the frame buffer holds a whole picture.  Measured: a
+-- frame-done freeze reproduces MAME exactly on rows 0-133 and 252-255 and
+-- differs on every pixel of rows 134-251, for any frame it is compared with.
 --
---   magic "STVS", u32 version = 2, u32 frame
---   u16 ctrl              last value written to 0x01F00000 (docs/hardware.md 7.5)
---   u16 dma[16]           the blitter's registers as last written
---   u16 vram[262144]      the frame buffer: 512 rows of 512 pixels, each
---                         { palette byte, pixel byte } exactly as MAME holds it
---   u16 pal[4096]         palette RAM, xRRRRRGGGGGBBBBB
---   u32 pix[256][410]     MAME's own output for this frame, from screen:pixels()
+-- Files, all little-endian:
 --
--- The frame buffer is two planes and the CPU can only see one at a time, so
--- this flips the video bank select in the control register, reads each plane
--- through the CPU's own VRAM window, and puts the register back the way the
--- game left it.  control_w only latches three values, so writing it twice
--- here is invisible to the game -- and the CPU is stopped while this runs.
+--   state_NNNNN.bin   the freeze at the frame-done boundary after picture
+--                     NNNNN, which is where the replay starts:
+--                       magic "STVS", u32 version = 3, u32 frame
+--                       u16 ctrl              0x01F00000, as last written
+--                       u16 dma[16]           the blitter's registers
+--                       u16 fb[262144]        512 rows of 512 pixels,
+--                                             { palette byte, pixel byte }
+--                       u16 pen[4096]         the display pens (see below)
 --
--- DUMPWHEN picks the moment inside the frame:
---   "done"  (default) the frame-done notifier, i.e. after the whole picture
---           has been scanned out and autoerase has wiped it
---   "dpyint" the first display interrupt of the frame, which on this game is
---           inside vertical blank at line 282 with the picture fully drawn
+--   trace.bin         every event that can change the picture, in order:
+--                       u32 frame   the frame-done boundary it follows, so
+--                                   these events compose picture frame+1
+--                       u16 vpos    raster line, 0..288, read from the
+--                                   TMS34010's own VCOUNT register (the Lua
+--                                   screen object in MAME 0.288 has no vpos)
+--                       u16 seq     sequence within the line, so two events
+--                                   on one line keep their order
+--                       u8  kind    0 blitter register, 1 CPU frame-buffer
+--                                   write, 2 palette write, 3 control write
+--                       u8  reg     blitter register number, for kind 0
+--                       u32 addr    word offset within the block
+--                       u16 data
+--                       u16 mask    the access's mem_mask
+--                     18 bytes each.
+--
+--   pic_NNNNN.bin     MAME's own picture for frame NNNNN: u32 ARGB, 410x256.
+--
+-- The pens are built by following palette writes rather than read back,
+-- because the pen is offset & 0xfff (paletteram_w in midyunit_v.cpp) and this
+-- game writes its palette through offsets 0x1000-0x1fff while 0x000-0xfff
+-- still hold the power-up RAM test's patterns.  Measured: 12,287 writes to the
+-- low half and 6,839 to the high half in a 28-second run, and the low half
+-- reads back as doubled-byte test patterns, not colours.
+--
+-- The frame buffer is two planes and the CPU sees one at a time, so the freeze
+-- flips the video bank select in the control register, reads each plane
+-- through the CPU's own VRAM window, and puts the register back.  control_w
+-- only latches three values and the CPU is stopped while this runs.
 local mac = manager.machine
 local sp  = mac.devices[":maincpu"].spaces["program"]
+local scr = mac.screens[":screen"]
 local dir = os.getenv("DUMP_DIR") or "."
-local when = os.getenv("DUMPWHEN") or "done"
 
 local VRAM_BASE = 0x00000000
 local PAL_BASE  = 0x01800000
-local DMA_BASE  = 0x01a80000
+local DMA_BASE  = 0x01a80000       -- the mirror the game uses
 local CTRL_BASE = 0x01f00000
 
-local want = {}
-for n in string.gmatch(os.getenv("DUMPFRAMES") or "1000", "%d+") do
-  want[tonumber(n)] = true
-end
+local FROM  = tonumber(os.getenv("FROM")  or "1500")
+local COUNT = tonumber(os.getenv("COUNT") or "8")
 local COIN  = tonumber(os.getenv("COIN")  or "1600")
 local START = tonumber(os.getenv("START") or "1700")
 
 local frames = 0
-local ctrl_last = 0x2c          -- until the game writes one
+local ctrl_last = 0x2c
 local dma = {}
+local pen = {}
 local taps = {}
+local trace = nil                  -- open while recording
+local tbuf = {}
 
 local function u16(f, v) f:write(string.char(v & 0xff, (v >> 8) & 0xff)) end
 local function u32(f, v)
   f:write(string.char(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff))
 end
 
--- read `words` 16-bit words from `base`, a bit address, into the file
-local function block(f, base, words)
-  local t = {}
-  for i = 0, words - 1 do
-    local v = sp:read_u16(base + i * 16)
-    t[#t + 1] = string.char(v & 0xff, (v >> 8) & 0xff)
-    if #t == 8192 then f:write(table.concat(t)); t = {} end
-  end
-  if #t > 0 then f:write(table.concat(t)) end
+local VCOUNT = 0xc0000000 + 29 * 16      -- reading it has no side effects
+local seq, seq_line = 0, -1
+
+local function event(kind, reg, addr, data, mask)
+  if not trace then return end
+  local v = sp:read_u16(VCOUNT)
+  if v ~= seq_line then seq_line, seq = v, 0 else seq = seq + 1 end
+  local h = seq & 0xffff
+  tbuf[#tbuf + 1] = string.char(
+    frames & 0xff, (frames >> 8) & 0xff, (frames >> 16) & 0xff, (frames >> 24) & 0xff,
+    v & 0xff, (v >> 8) & 0xff, h & 0xff, (h >> 8) & 0xff,
+    kind & 0xff, reg & 0xff,
+    addr & 0xff, (addr >> 8) & 0xff, (addr >> 16) & 0xff, (addr >> 24) & 0xff,
+    data & 0xff, (data >> 8) & 0xff, mask & 0xff, (mask >> 8) & 0xff)
+  if #tbuf >= 2048 then trace:write(table.concat(tbuf)); tbuf = {} end
 end
 
--- The frame buffer, both planes, as one u16 per pixel.  A VRAM word covers two
--- pixels: with the pixel bank selected it reads {px[2n+1].pixel, px[2n].pixel},
--- with the palette bank {px[2n+1].pal, px[2n].pal}.
-local function dump_vram(f)
-  local N = 512 * 512 // 2                       -- words
-  sp:write_u16(CTRL_BASE, (ctrl_last | 0x20) & 0xffff)      -- pixel plane
+taps[#taps+1] = sp:install_write_tap(CTRL_BASE, CTRL_BASE + 0x1f, "ctrl", function(off, data, mask)
+  ctrl_last = data & 0xffff
+  event(3, 0, (off - CTRL_BASE) >> 4, data & 0xffff, mask & 0xffff)
+end)
+taps[#taps+1] = sp:install_write_tap(DMA_BASE, DMA_BASE + 0x9f, "dma", function(off, data, mask)
+  local r = ((off - DMA_BASE) >> 4) & 0xf
+  dma[r] = data & 0xffff
+  event(0, r, r, data & 0xffff, mask & 0xffff)
+end)
+taps[#taps+1] = sp:install_write_tap(PAL_BASE, PAL_BASE + 0x1ffff, "pal", function(off, data, mask)
+  local o = ((off - PAL_BASE) >> 4) & 0xfff
+  local m = mask & 0xffff
+  pen[o] = ((pen[o] or 0) & ~m) | (data & m)
+  event(2, 0, o, data & 0xffff, m)
+end)
+taps[#taps+1] = sp:install_write_tap(VRAM_BASE, VRAM_BASE + 0x1fffff, "fb", function(off, data, mask)
+  event(1, 0, (off - VRAM_BASE) >> 4, data & 0xffff, mask & 0xffff)
+end)
+
+local function dump_state(n)
+  local f = io.open(string.format("%s/state_%05d.bin", dir, n), "wb")
+  f:write("STVS"); u32(f, 3); u32(f, n)
+  u16(f, ctrl_last)
+  for i = 0, 15 do u16(f, dma[i] or 0) end
+  local N = 512 * 512 // 2
+  -- Keep the register value in a local.  Writing it fires this script's own
+  -- control tap, which would otherwise overwrite ctrl_last with the flipped
+  -- value and make the restore below put the machine back wrong -- it left
+  -- the video bank select at 0 for the rest of the run, and the only place
+  -- that shows is a window where the CPU writes the frame buffer, which is
+  -- the power-up RAM test.  METHODOLOGY 5.1: suspect the instrument.
+  local keep = ctrl_last
+  sp:write_u16(CTRL_BASE, (keep | 0x20) & 0xffff)           -- pixel plane
   local pixlo, pixhi = {}, {}
   for i = 0, N - 1 do
     local v = sp:read_u16(VRAM_BASE + i * 16)
     pixlo[i] = v & 0xff ; pixhi[i] = (v >> 8) & 0xff
   end
-  sp:write_u16(CTRL_BASE, ctrl_last & 0xffdf)               -- palette plane
+  sp:write_u16(CTRL_BASE, keep & 0xffdf)                    -- palette plane
   local t = {}
   for i = 0, N - 1 do
     local v = sp:read_u16(VRAM_BASE + i * 16)
@@ -85,53 +145,26 @@ local function dump_vram(f)
     if #t == 4096 then f:write(table.concat(t)); t = {} end
   end
   if #t > 0 then f:write(table.concat(t)) end
-  sp:write_u16(CTRL_BASE, ctrl_last)                        -- as the game left it
-end
-
-local function dump(n)
-  local f = io.open(string.format("%s/state_%05d.bin", dir, n), "wb")
-  f:write("STVS"); u32(f, 2); u32(f, n)
-  u16(f, ctrl_last)
-  for i = 0, 15 do u16(f, dma[i] or 0) end
-  dump_vram(f)
-  block(f, PAL_BASE, 4096)
-  f:write(mac.screens[":screen"]:pixels())
+  sp:write_u16(CTRL_BASE, keep)                             -- exactly as found
+  ctrl_last = keep
+  for i = 0, 4095 do u16(f, pen[i] or 0) end
   f:close()
-  mac.screens[":screen"]:snapshot(string.format("%s/mame_%05d.png", dir, n))
 end
-
-taps[#taps+1] = sp:install_write_tap(CTRL_BASE, CTRL_BASE + 0x1f, "ctrl", function(off, data)
-  ctrl_last = data & 0xffff
-end)
-taps[#taps+1] = sp:install_write_tap(DMA_BASE, DMA_BASE + 0x9f, "dma", function(off, data)
-  dma[((off - DMA_BASE) >> 4) & 0xf] = data & 0xffff
-end)
 
 local function press(port, field, on)
   local p = mac.ioport.ports[port]
   if p and p.fields[field] then p.fields[field]:set_value(on and 0 or 1) end
 end
 
--- "dpyint": fire on the frame's first display interrupt, which this game puts
--- at line 282, inside vertical blank, with the picture drawn and not yet
--- autoerased.  The game rewrites DPYINT from inside the handler, so a write
--- tap on it is the same event one instruction later.
-local pending = nil
-if when == "dpyint" then
-  taps[#taps+1] = sp:install_write_tap(0xc00000a0, 0xc00000af, "dpyint", function(off, data)
-    if pending and (data & 0xffff) == 0x009a then dump(pending); pending = nil end
-  end)
-end
-
 _G.KEEP = { t = taps }
 _G.KEEP.s = emu.add_machine_stop_notifier(function()
-  local f = io.open(dir .. "/run.txt", "w")
-  f:write(string.format("frames %d\n", frames))
-  for n in pairs(want) do
-    local h = io.open(string.format("%s/state_%05d.bin", dir, n), "rb")
-    f:write(string.format("want %d %s\n", n, h and "ok" or "MISSING"))
-    if h then h:close() end
+  if trace then
+    if #tbuf > 0 then trace:write(table.concat(tbuf)) end
+    trace:close(); trace = nil
   end
+  local f = io.open(dir .. "/run.txt", "w")
+  f:write(string.format("frames %d\nfrom %d\ncount %d\n", frames, FROM, COUNT))
+  f:write(frames >= FROM + COUNT and "complete\n" or "TRUNCATED\n")
   f:close()
 end)
 _G.KEEP.n = emu.add_machine_frame_notifier(function()
@@ -144,7 +177,26 @@ _G.KEEP.n = emu.add_machine_frame_notifier(function()
     press(":IN0", "P1 Fire Right", (frames // 30) % 2 == 0)
     press(":IN0", "P1 Move Up",    (frames // 47) % 2 == 0)
   end
-  if want[frames] then
-    if when == "dpyint" then pending = frames else dump(frames) end
+  if frames >= FROM and frames <= FROM + COUNT then
+    -- snapshot(), not pixels().  Measured: taken at the same instant,
+    -- screen:pixels() returns a bitmap one frame older than screen:snapshot()
+    -- -- MAME double-buffers and pixels() reads the other buffer.  Comparing
+    -- against pixels() made a correct renderer look one frame ahead on every
+    -- moving object and exactly right on every still screen, which is the
+    -- shape of an instrument fault, not a renderer fault (METHODOLOGY 5.1).
+    scr:snapshot(string.format("%s/mame_%05d.png", dir, frames))
+  end
+  if frames == FROM then
+    dump_state(frames)
+    trace = io.open(dir .. "/trace.bin", "wb")
+  end
+  if frames == FROM + COUNT and trace then
+    if #tbuf > 0 then trace:write(table.concat(tbuf)); tbuf = {} end
+    trace:close(); trace = nil
+    -- a second freeze at the far end of the window, so the replay's frame
+    -- buffer can be compared with MAME's directly.  That separates a wrong
+    -- blit from wrong timing: if the buffers agree and the pictures do not,
+    -- the fault is in when things happen, not in what they draw.
+    dump_state(frames)
   end
 end)

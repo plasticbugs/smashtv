@@ -33,3 +33,11 @@ artifacts/**/*.rgb
 # Quartus byproducts
 projects/c5_pin_model_dump.txt
 projects/*.qws
+
+# Captured reference states, traces and MAME pictures: 18 MB, and exactly
+# reproducible from the romset with tools/dump_states.sh, so they are not
+# committed.  ref/states/README.md says how.
+/ref/states/*
+!/ref/states/README.md
+# the renderer's own pictures and diffs, for looking at
+/artifacts/video/
