@@ -5,8 +5,11 @@ local out = io.open(os.getenv("OUT") or "audio_run.txt", "w")
 local COIN  = tonumber(os.getenv("COIN")  or "-1")
 local START = tonumber(os.getenv("START") or "-1")
 local n = 0
+-- set_value(1) is PRESSED whatever the port's polarity (measured: the game
+-- read IN1 = FFFE from the frame after set_value(1)).  This had 0 for pressed
+-- until the machine bench and MAME disagreed about when the coin went in.
 local function press(f, on)
-  mac.ioport.ports[":IN2"].fields[f]:set_value(on and 0 or 1)
+  mac.ioport.ports[":IN1"].fields[f]:set_value(on and 1 or 0)
 end
 _G.KEEP = {}
 _G.KEEP.n = emu.add_machine_frame_notifier(function()

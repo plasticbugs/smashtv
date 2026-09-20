@@ -27,13 +27,18 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 if [ -n "$NVRAM" ]; then nv=$NVRAM; keep=1
 else mkdir -p "$root/.mame/tmp"; nv=$(mktemp -d "$root/.mame/tmp/nv.XXXXXX"); keep=
 fi
+# Not exec'd, because the directory has to be removed afterwards; so a signal
+# to this script is passed on, or killing it would leave MAME running.
 SDL_VIDEODRIVER=dummy \
 mame smashtv -rompath "$root/.mame/roms" \
     -video none -videodriver dummy -window -nomaximize \
     -sound none -nothrottle -skip_gameinfo \
     -cfg_directory "$root/.mame/cfg" -nvram_directory "$nv" \
     -snapshot_directory "$root/.mame/snap" \
-    "$@"
+    "$@" &
+pid=$!
+trap 'kill $pid 2>/dev/null' TERM INT HUP
+wait $pid
 rc=$?
 [ -n "$keep" ] || rm -rf "$nv"
 exit $rc

@@ -96,7 +96,7 @@ local function dump_lite(n)
 end
 
 local function press(port, field, on)
-  mac.ioport.ports[port].fields[field]:set_value(on and 0 or 1)  -- ACTIVE_LOW
+  mac.ioport.ports[port].fields[field]:set_value(on and 1 or 0)  -- ACTIVE_LOW
 end
 
 _G.KEEP = {}

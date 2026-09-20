@@ -35,9 +35,12 @@ end
 if START == 0 then start_trace() end
 dbg.execution_state = "run"
 
+-- set_value(1) is PRESSED whatever the port's polarity (measured: the game
+-- read IN1 = FFFE from the frame after set_value(1)).  This had 0 for pressed
+-- until the machine bench and MAME disagreed about when the coin went in.
 local function press(port, field, on)
     local p = mac.ioport.ports[port]
-    if p and p.fields[field] then p.fields[field]:set_value(on and 0 or 1) end
+    if p and p.fields[field] then p.fields[field]:set_value(on and 1 or 0) end
 end
 
 local frames, tracing = 0, true
