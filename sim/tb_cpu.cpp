@@ -30,7 +30,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <deque>
+#include <map>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -38,7 +41,7 @@
 struct Tx { uint32_t idx, addr; uint16_t data, mask; uint8_t write, region; uint16_t pad; };
 #pragma pack(pop)
 
-struct Insn { uint32_t pc; uint32_t r[32]; char text[48]; };   // r: ST A0-14 B0-14 SP
+struct Insn { uint32_t pc; uint32_t r[32]; char text[48]; uint64_t cyc; bool has_cyc; };   // r: ST A0-14 B0-14 SP
 
 static Vtb_cpu_top *dut;
 static long cycles = 0;
@@ -95,6 +98,8 @@ int main(int argc, char **argv) {
             if (line[0] == '=') {
                 char *p = line + 1;
                 for (int i = 0; i < 32; i++) out.r[i] = uint32_t(strtoul(p, &p, 16));
+                // an optional 33rd column: MAME's running cycle count (CYCLES=1)
+                char *q; out.cyc = strtoull(p, &q, 16); out.has_cyc = (q != p);
                 have = true;
             } else if (have && strlen(line) > 9 && line[8] == ':') {
                 out.pc = uint32_t(strtoul(line, nullptr, 16));
@@ -106,6 +111,10 @@ int main(int argc, char **argv) {
         }
         return false;
     };
+    struct Cyc { long n = 0, mame = 0, rtl = 0, bad = 0; std::string ex; long ex_m = 0, ex_r = 0; };
+    std::map<std::string, Cyc> cyc_by;
+    bool prev_has = false; uint64_t prev_mcyc = 0; uint32_t prev_rcyc = 0;
+    std::string prev_key, prev_text; long tot_m = 0, tot_r = 0;
     // one instruction of look-ahead, to see an interrupt coming
     Insn cur_i, nxt_i;
     bool have_cur = next_insn(cur_i), have_nxt = have_cur && next_insn(nxt_i);
@@ -174,6 +183,29 @@ int main(int argc, char **argv) {
         if (dut->insn_start) {
             if (!have_cur || (limit && long(ii) >= limit)) break;
             const Insn m = cur_i;
+            // ---- cycles: what each side charged for the instruction that
+            // has just finished (and any interrupt entry that followed it)
+            {
+                uint32_t rc = dut->rootp->tb_cpu_top__DOT__u_cpu__DOT__cyc_total;
+                if (prev_has && m.has_cyc) {
+                    long md = long(m.cyc - prev_mcyc), rd = long(rc - prev_rcyc);
+                    auto &c = cyc_by[prev_key];
+                    c.n++; c.mame += md; c.rtl += rd;
+                    if (md != rd) { if (!c.bad) { c.ex = prev_text; c.ex_m = md; c.ex_r = rd; } c.bad++; }
+                    tot_m += md; tot_r += rd;
+                }
+                prev_has = m.has_cyc; prev_mcyc = m.cyc; prev_rcyc = rc;
+                prev_text = m.text;
+                // the key: the mnemonic and the shape of its operands
+                std::string k;
+                for (const char *c = m.text; *c; c++) {
+                    if (isxdigit((unsigned char)*c) && (c == m.text || !isalpha((unsigned char)c[-1]) || k.empty() || k.back() == '#')) {
+                        if (k.empty() || k.back() != '#') k += '#';
+                    } else if (*c == 'h' && !k.empty() && k.back() == '#') {
+                    } else k += *c;
+                }
+                prev_key = k;
+            }
             bool bad = (dut->dbg_pc != m.pc);
             for (int i = 0; i < 32 && !bad; i++) if (rtl_reg(i) != m.r[i]) bad = true;
             if (bad) {
@@ -266,6 +298,19 @@ int main(int argc, char **argv) {
     printf("%zu instructions and %zu transactions matched MAME; %ld interrupts replayed, "
            "%ld graphics re-executions stepped over, %ld shift-register transfers\n",
            ii, ti, irqs, reexec, srts);
+    if (tot_m) {
+        printf("\ncycles charged: MAME %ld, RTL %ld (%+.3f%%)\n", tot_m, tot_r, 100.0 * (tot_r - tot_m) / tot_m);
+        std::vector<std::pair<std::string, Cyc>> v(cyc_by.begin(), cyc_by.end());
+        std::sort(v.begin(), v.end(), [](auto &a, auto &b) { return labs(a.second.rtl - a.second.mame) > labs(b.second.rtl - b.second.mame); });
+        printf("%-34s %9s %11s %11s %9s   first mismatch\n", "form", "count", "MAME", "RTL", "differ");
+        int shown = 0;
+        for (auto &e : v) {
+            if (!e.second.bad || shown++ >= 40) continue;
+            printf("%-34s %9ld %11ld %11ld %9ld   %s: MAME %ld, RTL %ld\n", e.first.c_str(), e.second.n,
+                   e.second.mame, e.second.rtl, e.second.bad, e.second.ex.c_str(), e.second.ex_m, e.second.ex_r);
+        }
+        if (!shown) printf("every instruction was charged what MAME charges\n");
+    }
     delete dut;
     if (fail == 1) return 1;
     if (fail == 2) return 3;

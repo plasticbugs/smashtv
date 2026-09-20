@@ -431,6 +431,9 @@ module tms34010 #(
     logic signed [10:0] bal;
     logic         [7:0] cyc_add;        // cycles this clock adds to the debt
     logic               cyc_stb;
+    // every cycle ever charged, for the bench to hold against MAME's count
+    // (sim/tb_cpu.cpp); nothing reads it, so synthesis removes it
+    logic        [31:0] cyc_total /* verilator public_flat_rd */;
     logic [31:0] vec_addr;
     logic        push_st_too;           // a trap or interrupt: push ST after PC
     logic [31:0] ret_pc;
@@ -740,6 +743,7 @@ module tms34010 #(
         if (dpyint) io_intpend[10] <= 1'b1;
 
         cyc_stb <= 1'b0;
+        if (cyc_stb) cyc_total <= cyc_total + {24'd0, cyc_add};
         bal <= bal + (cyc_stb ? $signed({3'd0, cyc_add}) : 11'sd0)
                    - ((cen && bal > CREDIT) ? 11'sd1 : 11'sd0);
 
@@ -748,7 +752,7 @@ module tms34010 #(
             for (int i = 0; i < 15; i++) begin ra[i] <= '0; rb[i] <= '0; end
             io_control <= '0; io_convsp <= '0; io_convdp <= '0; io_psize <= '0;
             io_pmask <= '0; io_intenb <= '0; io_intpend <= '0; io_srt <= 1'b0; bus_srt <= 1'b0;
-            bus_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; bal <= '0; cyc_stb <= 1'b0; ext_seen <= 1'b0;
+            bus_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; bal <= '0; cyc_total <= '0; cyc_stb <= 1'b0; ext_seen <= 1'b0;
             push_st_too <= 1'b0;
         end else case (state)
             // ------------------------------------------------ reset

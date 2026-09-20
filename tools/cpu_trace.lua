@@ -21,6 +21,13 @@ for i = 0, 14 do regs = regs .. ",a" .. i end
 for i = 0, 14 do regs = regs .. ",b" .. i end
 regs = regs .. ",sp"
 local fmt = "=" .. string.rep("%08X ", 32)
+-- CYCLES=1 appends the CPU's running cycle count, so the difference between
+-- two lines is what MAME charged for the instruction between them (and any
+-- interrupt entry).  sim/tb_cpu.cpp compares it with what the RTL charged.
+if os.getenv("CYCLES") == "1" then
+    regs = regs .. ",totalcycles"
+    fmt = fmt .. "%X "
+end
 local function start_trace()
     dbg:command(string.format('trace %s/trace_reg.txt,maincpu,noloop,{tracelog "%s\\n",%s}',
                               dir, fmt, regs))

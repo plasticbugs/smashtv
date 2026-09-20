@@ -18,6 +18,6 @@ mkdir -p "$dir"
 rm -f "$dir/trace_bus.bin" "$dir/trace_reg.txt" "$dir/ioregs.txt"
 START_FRAME="$start" TRACE_DIR="$dir" TRACE_N=$(( frames * 120000 )) "$root/tools/mame.sh" \
     -autoboot_script "$root/tools/bus_trace.lua" -seconds_to_run "$secs" >/dev/null 2>&1 || true
-START_FRAME="$start" TRACE_DIR="$dir" TRACE_FRAMES="$frames" "$root/tools/mame.sh" -debug -debugger none \
+CYCLES=1 START_FRAME="$start" TRACE_DIR="$dir" TRACE_FRAMES="$frames" "$root/tools/mame.sh" -debug -debugger none \
     -autoboot_script "$root/tools/cpu_trace.lua" -seconds_to_run "$secs" >/dev/null 2>&1 || true
 ls -la "$dir" | tail -3
