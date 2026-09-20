@@ -19,12 +19,16 @@ checked against (METHODOLOGY section 1).  It carries four things:
               pixel of rows 134-251.
 
 Usage:
-    tools/render_model.py <dir> <image.rom> [-o outdir] [-v]
+    tools/render_model.py <dir> <image.rom> [-o outdir] [--idx idxdir] [-v]
 
         `dir` holds what tools/dump_state.lua wrote: state_NNNNN.bin,
-        trace.bin and pic_NNNNN.bin.  Replays the trace from the state and
+        trace.bin and mame_NNNNN.png.  Replays the trace from the state and
         compares every frame with MAME's own picture.  Exit status is the
         number of frames that differ.
+
+        --idx writes idx_NNNNN.bin per frame: VIS_H rows of VIS_W 16-bit
+        palette indices, which is what sim/run_video.sh holds the RTL to.
+        Indices, not colours, because two pens can share a colour.
 
     tools/render_model.py <state.bin> [-o out.png]
 
@@ -384,9 +388,12 @@ def compare(mine, theirs):
 def main():
     args = list(sys.argv[1:])
     outdir = None
+    idxdir = None
     verbose = False
     if '-o' in args:
         i = args.index('-o'); outdir = args[i + 1]; del args[i:i + 2]
+    if '--idx' in args:
+        i = args.index('--idx'); idxdir = args[i + 1]; del args[i:i + 2]
     if '-v' in args:
         args.remove('-v'); verbose = True
 
@@ -426,6 +433,11 @@ def main():
         pic = os.path.join(d, f'mame_{frame:05d}.png')
         if not os.path.exists(pic):
             continue
+        if idxdir:
+            os.makedirs(idxdir, exist_ok=True)
+            with open(os.path.join(idxdir, f'idx_{frame:05d}.bin'), 'wb') as f:
+                for r in rows:
+                    f.write(struct.pack(f'<{VIS_W}H', *r))
         mine = to_rgb(rows, pen)
         theirs = mame_rgb(pic)
         bad, first = compare(mine, theirs)

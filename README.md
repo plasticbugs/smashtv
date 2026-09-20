@@ -11,8 +11,9 @@ MC1408) alongside. The gateware here is **not finished** — see Status.
 | board part | implementation | verified by |
 |---|---|---|
 | TMS34010 @ 40 MHz ÷ 8 | *not written* | — |
-| Williams DMA blitter | `tools/render_model.py` (reference model only) | pixel-identical to MAME over 76 frames in 8 windows |
-| frame buffer + scanout | `tools/render_model.py` (reference model only) | the same 8 windows, and byte-identical frame buffers at the end of each |
+| Williams DMA blitter | `rtl/stv_blit.sv` | `sim/run_video.sh`: index-identical to the reference renderer on 68 frames in 8 windows, at 4.00 clocks per source pixel against the board's 3.936 |
+| frame buffer, two planes | `rtl/stv_vram.sv` | the same gate; block RAM for rows 0-255 and the autoerase templates, SDRAM for rows 256-509 |
+| raster, scanout, palette | `rtl/stv_video.sv` | the same gate; 410×256 at 54.7069 Hz off an 8.000 MHz dot clock, which is the board's exactly |
 | MC6809E @ 2 MHz | *not vendored yet* | — |
 | YM2151 @ 3.579545 MHz | *not vendored yet* | — |
 | HC-55516 CVSD | *not written* | — |
@@ -43,6 +44,15 @@ Proven, and by what:
 - **The Pocket memory path.** `sim/run_mem.sh` pushes the real image through
   the download port at the loader's rate — a byte per 8 clocks, strobe held 4
   — and reads all 1,114,112 words back through the core's ports: none wrong.
+- **The video RTL** (`rtl/stv_blit.sv`, `rtl/stv_vram.sv`, `rtl/stv_video.sv`)
+  produces the same 410×256 palette indices as the reference renderer on all
+  68 frames of all eight windows — the blitter, the two frame-buffer planes,
+  the CPU's window into them, autoerase, the 6-bit pen map and the palette.
+  `sim/run_video.sh` loads a frozen state through the CPU's own port, replays
+  the same trace, and diffs indices rather than colours. It also measures:
+  the blitter runs at **4.00 clocks per source pixel** against the board's
+  3.936, no event ever lands on a later raster line than MAME had it, and no
+  write is ever held off because the display was fetching that row.
 - **The reference renderer** (`tools/render_model.py`) is pixel-identical to
   MAME on every frame of eight captured windows spanning the power-up RAM
   test, the CPU drawing text, the ROM check, a screen clear, the title, the
@@ -53,9 +63,15 @@ Proven, and by what:
 
 Not proven:
 
-- **There is no gateware for this machine yet.** No CPU, no blitter, no
-  video, no sound. Everything in the table above with an implementation is
-  Python, not RTL.
+- **There is no CPU and no sound**, so there is no machine: `rtl/smashtv_core.sv`
+  still draws the template's test pattern. The video RTL above is verified in
+  isolation against the renderer and is **not wired into the core**, because
+  without a CPU to program it the screen would be black — and the skeleton
+  working on a Pocket is worth more than an unfinished machine.
+- **The block-RAM budget is arithmetic, not a measurement.** The frame
+  buffer's hot rows want 258 of the 5CEBA4's M10K blocks and everything else
+  about 10 more, which is 87%. The first fit that includes them is the check;
+  `docs/core-design.md` section 3 has the fallback if it does not fit.
 - Three parts of the video model are **unverified rather than correct**: the
   autoerase lag (±1 raster line makes no difference to any captured frame),
   which of the two template rows a row is erased from (the game keeps them
@@ -92,6 +108,7 @@ only — a couple of minutes, and it catches what Verilator cannot.
 ```sh
 sim/lint.sh                 # every module on its own
 sim/run_mem.sh              # the Pocket's memory path, at the loader's real rate
+sim/run_video.sh            # the video RTL against the renderer: zero indices or fail
 
 tools/shadow_romset.sh      # once: the romset under the names MAME 0.288 wants
 REGION_DIR=/tmp/r tools/mame.sh -seconds_to_run 2 \
