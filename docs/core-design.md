@@ -165,8 +165,10 @@ client's ack is asserted. **Zero is not the expected answer; surviving it is.**
 
 ## 5. What the Pocket shows and reads
 
-- **Video**: 410 × 256 at 54.7069 Hz, `ROT0`. `video.json` gets the raster
-  above; the aspect ratio is `4:3` and is *not* transposed, because there is
+- **Video**: 410 × 256 at 54.7069 Hz, `ROT0`, handed to the Pocket **412** wide
+  with a black column either side (`rtl/stv_pad.sv`): the scaler exchanges the
+  halves of every four-pixel group when the width is not a multiple of four
+  (found on hardware, `docs/bringup.md`). `video.json` says 412 × 256; the aspect ratio is `4:3` and is *not* transposed, because there is
   no rotation (METHODOLOGY §5.5).
 - **Controls**: Smash T.V. is a **twin-stick** game — the left stick moves and
   the right stick fires, both 8-way (`docs/hardware.md` §3). On a Pocket the

@@ -3,8 +3,8 @@
 **Smash T.V.**, Williams 1990, on **Midway Y-Unit** hardware: a TMS34010
 graphics processor driving a 512×512 frame buffer through a custom Williams
 DMA blitter, with a Williams CVSD sound board (MC6809E, YM2151, HC-55516,
-MC1408) alongside. The gateware is whole and builds, and **has not yet run on
-a Pocket** — see Status.
+MC1408) alongside. **It runs on a Pocket**: picture, sound and controls,
+checked by eye and ear on hardware at 0.1.0 — see Status.
 
 > **ROMs are not included and never will be.** You supply your own MAME
 > `smashtv` romset; the core reads one image built from it.
@@ -20,18 +20,32 @@ a Pocket** — see Status.
 | ROMs, RAM, CMOS | Pocket SDRAM and SRAM (`target/pocket/smashtv_mem.sv`) | `sim/run_mem.sh`: the image at the loader's real rate, every port read back, all clients at once; image byte-identical to MAME's |
 | the core on the Pocket's memories | `rtl/smashtv_core.sv` on `smashtv_mem` | `sim/run_pocket.sh`: boots, passes the game's own RAM, ROM and custom-chip tests, takes a coin and plays, with the CPU at 98-100% of MAME's speed in attract and play |
 | the build | Quartus 18.1, `./build-local.sh compile` | fits (62% ALMs, 301/308 block RAMs); timing closed in every corner; every constraint applied |
+| all of it, on a Pocket | release 0.1.0, bitstream md5 `a15ab9fde2f7f1d82ff5104726e1b40a` | seen and heard on hardware: boot tests, attract, coin, start, play |
 
 One row per part of the board. The right-hand column is the point of the
 table: it says what checks each part, and where it says nothing, nothing does.
 
 ## Status
 
-**It has never run on a Pocket.** Everything below is simulation against MAME
-and a Quartus build. The whole machine is in the core; it boots, takes a coin
-and plays in simulation on the Pocket's real memory controllers; and the
-build **fits and closes timing at 96 MHz in every corner** (62% of the logic,
-301 of the 308 block RAMs, +0.40 ns setup, +0.11 ns hold). The next step is a
-first flash, with `docs/bringup.md` in hand.
+**0.1.0 runs on an Analogue Pocket.** The build that was released boots
+through the game's own RAM, ROM and custom-chip tests, plays attract mode,
+takes a coin, starts and plays, with the right picture, sound and controls,
+as seen and heard by the person holding it. Everything else below is
+simulation against MAME and the Quartus build (62% of the logic, 301 of the
+308 block RAMs, timing closed at 96 MHz in every corner).
+
+Hardware found two things no simulation here could, both now guarded:
+
+- The PLL's video clock was still the template's 96/14 MHz while the core made
+  a dot every 12 clocks: static, with the game playing behind it. `sim/lint.sh`
+  now checks the PLL against the dot divider and `sim/run_pocket.sh` samples
+  pixels the way the Pocket does.
+- The picture is 410 pixels wide and **the Pocket's scaler wants a multiple of
+  four**: at 410 every four-pixel group came out with its halves exchanged
+  (columns 2-3-0-1), everywhere, in no simulation. `rtl/stv_pad.sv` hands it
+  over 412 wide with a black column either side, and that fixed it outright.
+  `docs/bringup.md` has the log and `artifacts/pocket/hardware_fault/` the
+  photograph against the candidate permutations.
 
 Proven, and by what:
 
@@ -75,10 +89,9 @@ Proven, and by what:
 
 Not proven:
 
-- **Anything on hardware.** No build of this core has been on a Pocket. The
-  SDRAM and SRAM controllers are proven there in other cores; this is the
-  first to use the SRAM's seventeenth address line, and the power-on
-  self-test is there to say whether it works.
+- **Much of the game on hardware.** One person has played the first rooms of
+  one build. Later levels, a second player, the test menu's contents and long
+  sessions have not been looked at.
 - **Frame-exactness with the timed CPU.** To close timing the TMS34010
   advances one clock in three. It is held to MAME instruction for
   instruction, transaction for transaction and cycle for cycle

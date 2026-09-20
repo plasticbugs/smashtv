@@ -8,9 +8,9 @@
       "shortname": "smashtv",
       "description": "Smash T.V. (Williams, 1990) arcade core",
       "author": "plasticbugs",
-      "url": "https://github.com/plasticbugs/analogue-pocket-smashtv",
-      "version": "0.0.1",
-      "date_release": "1970-01-01"
+      "url": "https://github.com/plasticbugs/smashtv",
+      "version": "0.1.0",
+      "date_release": "2026-09-20"
     },
     "framework": {
       "target_product": "Analogue Pocket",

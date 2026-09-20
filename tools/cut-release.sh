@@ -3,9 +3,14 @@
 #
 # Usage: cut-release.sh <tag> <run-id>
 #        cut-release.sh v1.0.0 32214080417
+#        cut-release.sh <tag> --bitstream <file> <md5>
+#        cut-release.sh v0.1.0 --bitstream release/pocket/Cores/plasticbugs.smashtv/bitstream.rbf_r a15ab9fd...
 #
 # Takes the bitstream from that run rather than recompiling, so the release
-# ships the exact gateware that was tested on hardware. Everything outside the
+# ships the exact gateware that was tested on hardware.  When the build that
+# was tested was a LOCAL one (./build-local.sh), give the file and the md5 that
+# was on the card: a rebuild is never byte-identical (METHODOLOGY section 5.6),
+# so the md5 is what ties the release to what was seen working. Everything outside the
 # bitstream (JSON definitions, platform image, ROM recipe, README) comes from
 # the working tree, which is how a definition-only change can be released
 # without a rebuild.
@@ -15,7 +20,13 @@
 set -e
 TAG="$1"
 RUN="$2"
-[ -n "$TAG" ] && [ -n "$RUN" ] || { echo "usage: cut-release.sh <tag> <run-id>"; exit 1; }
+[ -n "$TAG" ] && [ -n "$RUN" ] || { echo "usage: cut-release.sh <tag> <run-id> | <tag> --bitstream <file> <md5>"; exit 1; }
+LOCAL_RBF=; LOCAL_MD5=
+if [ "$RUN" = "--bitstream" ]; then
+    LOCAL_RBF="$3"; LOCAL_MD5="$4"
+    [ -f "$LOCAL_RBF" ] && [ -n "$LOCAL_MD5" ] || { echo "usage: cut-release.sh <tag> --bitstream <file> <md5>"; exit 1; }
+    case "$LOCAL_RBF" in /*) ;; *) LOCAL_RBF="$PWD/$LOCAL_RBF";; esac
+fi
 cd "$(dirname "$0")/.."
 
 command -v gh >/dev/null || { echo "gh CLI required"; exit 1; }
@@ -29,8 +40,16 @@ fi
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 
-echo "fetching bitstream from run $RUN ..."
-gh run download "$RUN" -D "$STAGE" || { echo "download failed"; exit 1; }
+if [ -n "$LOCAL_RBF" ]; then
+    GOT=$(md5 -q "$LOCAL_RBF" 2>/dev/null || md5sum "$LOCAL_RBF" | cut -d' ' -f1)
+    [ "$GOT" = "$LOCAL_MD5" ] || { echo "$LOCAL_RBF is $GOT, not the tested $LOCAL_MD5"; exit 1; }
+    mkdir -p "$STAGE/local/Cores/plasticbugs.smashtv"
+    cp "$LOCAL_RBF" "$STAGE/local/Cores/plasticbugs.smashtv/bitstream.rbf_r"
+    echo "using the local bitstream, md5 $GOT"
+else
+    echo "fetching bitstream from run $RUN ..."
+    gh run download "$RUN" -D "$STAGE" || { echo "download failed"; exit 1; }
+fi
 # The run ships one bitstream per core, each under its own Cores/<id>/ folder.
 CORES=$(find "$STAGE" -name 'bitstream.rbf_r' -exec dirname {} \; | xargs -n1 basename | sort -u)
 [ -n "$CORES" ] || { echo "no bitstream in run $RUN"; exit 1; }
@@ -78,7 +97,7 @@ if find "$OUT" -name '*.rom' | grep -q .; then
 fi
 
 VER=$(python3 -c "import json;print(json.load(open('pkg/pocket/Cores/plasticbugs.smashtv/core.json'))['core']['metadata']['version'])")
-ZIP="$PWD/mcr68-pocket-sdcard.zip"
+ZIP="$PWD/smashtv-pocket-sdcard.zip"
 rm -f "$ZIP"
 (cd "$OUT" && zip -qr "$ZIP" .)
 echo "package $VER, zip $(wc -c < "$ZIP") bytes"
@@ -87,7 +106,7 @@ for c in $CORES; do
 done
 
 gh release create "$TAG" \
-    --title "MCR-68000 for Analogue Pocket $TAG" \
+    --title "Smash T.V. for Analogue Pocket $TAG" \
     --notes-file docs/release-notes.md \
     "$ZIP"
 rm -f "$ZIP"

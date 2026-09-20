@@ -39,7 +39,9 @@ boards.
 
 ## The panel
 
-Menu -> **Bring-up: panel**. Four rows of 32 squares along the bottom edge of
+Menu -> **Bring-up: panel** (not on the release's menu: add the entry back to
+`interact.json`, address `0xF2000000`, value `0x00000008`, mask `0xFFFFFFF7`).
+Four rows of 32 squares along the bottom edge of
 the picture. Green is 1. Read each row from the end where row 0 shows
 `1010 1010`.
 
@@ -113,6 +115,12 @@ chip, and main RAM and the CMOS are landing on top of each other.
   a black column at each edge.  If it is unchanged the theory is dead; next
   would be the line's TOTAL length, 506 dots, which is also 2 more than a
   multiple of four.
+- 2026-09-20, build `a15ab9fd...` (412 wide): **"It's perfect."**  The theory
+  is confirmed by its prediction: the Pocket's scaler needs a picture width
+  that is a multiple of four.  This is the build released as 0.1.0.  The
+  bring-up entries came off the menu for the release; they are still wired in
+  `core_top.sv` (modifier word bits 3, 4, 5, 7 and 15), and putting the five
+  entries back in `interact.json` needs no rebuild.
 
 Date, build md5, what was seen, what it ruled out. One line each. The theories
 that died belong here as much as the one that lived.
