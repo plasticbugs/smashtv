@@ -118,6 +118,10 @@ tools/verify_rom.py /tmp/smashtv.rom /tmp/r    # the image against MAME
 tools/dump_states.sh        # capture the reference states and traces (~20 s)
 tools/regress_video.sh      # the renderer against MAME: zero pixels or fail
 tools/teeth_video.py        # what that gate can and cannot catch
+
+TRACE_DIR=/tmp/b tools/mame.sh -seconds_to_run 1 \
+    -autoboot_script tools/bus_trace.lua      # every TMS34010 bus transaction
+tools/diff_bus.py --selftest /tmp/b/trace_bus.bin
 ```
 
 Add the core's own gates here as they come to exist: the RTL against the

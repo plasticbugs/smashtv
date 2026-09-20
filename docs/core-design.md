@@ -185,7 +185,7 @@ client's ack is asserted. **Zero is not the expected answer; surviving it is.**
 | part | checked by |
 |---|---|
 | blitter, frame buffer, scanout | `sim/run_video.sh`: the RTL loaded with a frozen state, fed the same trace, diffed against `tools/render_model.py` — zero differing palette indices |
-| TMS34010 | a bus trace against MAME, transaction by transaction, and per-instruction cycle counts (METHODOLOGY §4, the pattern `rtl/i8085.sv` was built on) |
+| TMS34010 | a bus trace against MAME, transaction by transaction, and per-instruction cycle counts (METHODOLOGY §4, the pattern `rtl/i8085.sv` was built on). `tools/bus_trace.lua` and `tools/diff_bus.py` exist and are self-tested; the CPU does not. Measured: the trace sees **every** instruction fetch, including the repeated fetches of a tight loop, so MAME is not skipping bus cycles for its instruction cache and the comparison can be one-to-one |
 | the whole machine, ideal memories | frames against MAME |
 | the whole machine, real memory glue | `sim/run_pocket.sh` — **before the first flash** (METHODOLOGY §5.16) |
 | sound | band energy per second against a MAME recording, over a whole capture in play (METHODOLOGY §5.9) |
