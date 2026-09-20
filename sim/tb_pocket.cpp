@@ -52,6 +52,16 @@ int main(int argc, char **argv) {
     std::vector<uint8_t> fb(1024 * 512 * 3, 0);
     std::vector<int16_t> pcm;
     int x = 0, y = 0, maxx = 0; bool was_de = false, was_vb = true;
+    // The power-up RAM test drives the frame buffer through the CPU harder than
+    // anything else in the game, and this machine runs it a few percent slower
+    // than MAME (its CPU steps one clock in three, and its memories are not
+    // free), so the boot ends some frames later than MAME's and every frame
+    // number after it is off by that much.  The game resets the sound board
+    // when the tests are done - MAME's frame BOOT_END_MAME, empty NVRAM - and
+    // from there on the bench counts, names its pictures and presses its
+    // buttons in GAME frames: its own, less the difference at that moment.
+    const long BOOT_END_MAME = 1046;
+    long offset = 0; bool synced = false;
     long frame = 0;
     unsigned last_word = 0;
     uint32_t cyc0 = 0; long clk0 = 0;
@@ -67,7 +77,11 @@ int main(int argc, char **argv) {
         if (cycles % 2000 == 0) { pcm.push_back((int16_t)(acc / 2000)); acc = 0; }
         if (dut->snd_word != last_word) {
             last_word = dut->snd_word;
-            fprintf(sndlog, "%.9f %ld %04x\n", cycles / 96e6, frame, last_word); fflush(sndlog);
+            if (!synced && frame > 500 && last_word == 0xfe00) {
+                synced = true; offset = frame - BOOT_END_MAME;
+                printf("boot ended at frame %ld, MAME's at %ld: game frames are this bench's less %ld\n", frame, BOOT_END_MAME, offset);
+            }
+            fprintf(sndlog, "%.9f %ld %04x\n", cycles / 96e6, frame - offset, last_word); fflush(sndlog);
         }
         if (dut->dbg_unimpl) { printf("STOP  unimplemented instruction near PC %08x, frame %ld\n", dut->dbg_pc, frame); break; }
         if (!dut->dot_ce) continue;
@@ -83,7 +97,8 @@ int main(int argc, char **argv) {
             // game can first read after notifier N+1 (measured: set at 1600,
             // IN1 reads FFFE from 1601 to 1611).
             uint16_t i0 = 0xffff, i1 = 0xffff;
-            const long f = frame - 1;
+            const long gf = frame - offset;        // the game's frame, as MAME numbers it
+            const long f = gf - 1;
             if (f >= 1600 && f < 1610) i1 &= ~0x0001;                  // coin 1
             if (f >= 1700 && f < 1710) i1 &= ~0x0004;                  // start 1
             if (f > 1800) {
@@ -91,8 +106,8 @@ int main(int argc, char **argv) {
                 if ((f / 47) % 2 == 0) i0 &= ~0x0001;                  // move up
             }
             dut->in0 = i0; dut->in1 = i1;
-            if (y > 0 && (frame % every == 0 || frame == nframes || (frame >= dense0 && frame <= dense1))) {
-                char name[512]; snprintf(name, sizeof(name), "%s/rtl_%05ld_%dx%d.rgb", out.c_str(), frame, maxx, y);
+            if (y > 0 && (gf % every == 0 || frame == nframes || (gf >= dense0 && gf <= dense1))) {
+                char name[512]; snprintf(name, sizeof(name), "%s/rtl_%05ld_%dx%d.rgb", out.c_str(), gf, maxx, y);
                 FILE *f = fopen(name, "wb");
                 for (int r = 0; r < y; r++) fwrite(&fb[r*1024*3], 1, maxx*3, f);
                 fclose(f);
