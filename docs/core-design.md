@@ -224,14 +224,18 @@ good:
 
 ## 8. Not built yet
 
-- **Saving the CMOS.** The game's settings, audits and high scores are 32 KB
-  in the Pocket's SRAM and are lost at power-off, so every boot shows FAILURE
-  IN CMOS RAM for seven seconds and restores the defaults
-  (`docs/hardware.md` §3). The S.T.U.N. Runner core has a save slot proven on
-  hardware (a loader, an unloader and a save timer on the APF's dataslot
-  commands); here the memory behind it is the shared SRAM rather than a block
-  RAM of its own, so the unloader needs a turn on `sram_port`. It is a
-  feature for after the first boot on hardware, not a condition of it.
+- **Saving the CMOS to the card.** The game's settings, audits and high
+  scores are 32 KB in the Pocket's SRAM. **Seen on hardware: they persist
+  between restarts** - the SRAM keeps its contents across a core reset and
+  reload - so the FAILURE IN CMOS RAM screen (`docs/hardware.md` §3) is what a
+  blank memory shows, not what every power-on shows. Nothing backs them with a
+  file, so how long they survive with the Pocket off is not known. The
+  S.T.U.N. Runner core has a save slot proven on hardware (a loader, an
+  unloader and a save timer on the APF's dataslot commands); here the memory
+  behind it is the shared SRAM rather than a block RAM of its own, so the
+  unloader needs a turn on `sram_port`. Because the memory survives,
+  everything that touches it outside the game has to leave it as it found it:
+  the power-on self-test did not, in 0.1.0 (`target/pocket/sram_selftest.sv`).
 - **The watchdog** (`docs/hardware.md` §10). Nothing resets the game if the
   program hangs, and nothing resets it when the menu has been open a long
   time either.

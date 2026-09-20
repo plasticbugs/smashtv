@@ -33,9 +33,15 @@ coin and plays, with correct picture, sound and controls.
 
 ### Known
 
-- **Every power-on shows FAILURE IN CMOS RAM / DEFAULT ADJUSTMENTS RESTORED
-  for about seven seconds.** That is the game finding a blank battery-backed
-  memory, as a cabinet with a flat battery would; it restores factory settings
-  and carries on. Settings and high scores are not saved yet.
+- **Settings and high scores are kept in the Pocket's SRAM, not in a save
+  file.** As seen on hardware they persist between restarts; nothing is
+  written to the SD card, so do not count on them across a long power-off.
+  The first start on a blank memory shows FAILURE IN CMOS RAM / DEFAULT
+  ADJUSTMENTS RESTORED for about seven seconds, as a cabinet with a flat
+  battery would, and carries on. *(These notes first said settings were lost
+  at every power-on. That was an assumption, and it was wrong.)*
+- **0.1.0's power-on memory test overwrites one word of that memory at every
+  start** - the first word of the game's high-score table - without putting
+  it back. Fixed in the source after 0.1.0; it will be in the next release.
 - The power-up self-test takes about a second longer than the arcade board's.
 - Tested by one person on the first rooms of the game. Reports welcome.

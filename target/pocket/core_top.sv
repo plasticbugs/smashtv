@@ -914,46 +914,23 @@ module core_top
     //! A55A and 5AA5 are chosen to be each other's byte-swap and nibble
     //! inverse, so a stuck bit, a swapped byte lane and a dead bus all read
     //! differently from a pass.
-    localparam logic [15:0] SRAM_T0 = 16'hA55A, SRAM_T1 = 16'h5AA5;
-    localparam logic [16:0] SRAM_A0 = 17'h00000, SRAM_A1 = 17'h10000;
     wire        cr_req, cr_we, cr_ack;
     wire [16:0] cr_addr;  wire [15:0] cr_d;
-    logic [15:0] sram_rd0, sram_rd1;
-    logic  [2:0] sram_st;
-    logic        sram_done, tv_req, tv_we;
-    logic [16:0] tv_addr;
-    logic [15:0] tv_din;
-    // A port that never acknowledges would leave the core in reset for good
-    // and the panel showing nothing but zeros, which looks the same as a
-    // memory that answers wrongly.  Give up after a millisecond instead: the
-    // read-backs stay zero, but the core runs and says so.
-    logic [16:0] sram_tmo;
-
-    always_ff @(posedge clk_sys) begin
-        if (!mem_ready) begin
-            sram_st <= 3'd0; sram_done <= 1'b0; tv_req <= 1'b0; tv_we <= 1'b0;
-            sram_rd0 <= '0; sram_rd1 <= '0; sram_tmo <= '0;
-        end else if (!sram_done) begin
-            sram_tmo <= sram_tmo + 17'd1;
-            if (&sram_tmo) sram_done <= 1'b1;       // ~1.4 ms at 96 MHz
-            case (sram_st)
-                3'd0: begin tv_we <= 1'b1; tv_addr <= SRAM_A0; tv_din <= SRAM_T0;
-                            tv_req <= 1'b1; sram_st <= 3'd1; end
-                3'd1: if (ram_ack) begin tv_req <= 1'b0; sram_st <= 3'd2; end
-                3'd2: begin tv_we <= 1'b1; tv_addr <= SRAM_A1; tv_din <= SRAM_T1;
-                            tv_req <= 1'b1; sram_st <= 3'd3; end
-                3'd3: if (ram_ack) begin tv_req <= 1'b0; sram_st <= 3'd4; end
-                3'd4: begin tv_we <= 1'b0; tv_addr <= SRAM_A0;
-                            tv_req <= 1'b1; sram_st <= 3'd5; end
-                3'd5: if (ram_ack) begin sram_rd0 <= ram_q; tv_req <= 1'b0; sram_st <= 3'd6; end
-                3'd6: begin tv_we <= 1'b0; tv_addr <= SRAM_A1;
-                            tv_req <= 1'b1; sram_st <= 3'd7; end
-                3'd7: if (ram_ack) begin sram_rd1 <= ram_q; tv_req <= 1'b0;
-                                         sram_done <= 1'b1; end
-                default: ;
-            endcase
-        end
-    end
+    wire [15:0] sram_rd0, sram_rd1;
+    wire        sram_done, tv_req, tv_we;
+    wire [16:0] tv_addr;
+    wire [15:0] tv_din;
+    //! The test is its own module so that sim/run_mem.sh can run it against
+    //! the real SRAM port: core_top itself is in no bench.  It PUTS BACK the
+    //! two words it overwrites - the second is the first word of the game's
+    //! CMOS, and the SRAM keeps its contents across a core reset (seen on
+    //! hardware: settings persist between restarts).  0.1.0 shipped without
+    //! the putting back, and damaged that word at every start.
+    sram_selftest u_sramtest (
+        .clk(clk_sys), .hold(!mem_ready),
+        .req(tv_req), .we(tv_we), .addr(tv_addr), .d(tv_din), .ack(ram_ack), .q(ram_q),
+        .done(sram_done), .rd0(sram_rd0), .rd1(sram_rd1)
+    );
 
     assign ram_req  = sram_done ? cr_req  : tv_req;
     assign ram_we   = sram_done ? cr_we   : tv_we;

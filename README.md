@@ -100,9 +100,16 @@ Not proven:
   than MAME's (51 on the Pocket's memories) and frames after it line up with
   MAME's only to within a frame or three. The frame-for-frame identity
   through 2000 frames was measured on the CPU before that change.
-- **The CMOS is not saved.** Every power-on shows FAILURE IN CMOS RAM for
-  seven seconds and restores factory settings; high scores are lost.
-  `docs/core-design.md` section 8.
+- **The CMOS is not saved to the SD card.** It lives in the Pocket's SRAM,
+  which - as seen on hardware - keeps the game's settings and high scores
+  between restarts; no save file backs it, so a long power-off may lose it, and
+  a blank one shows FAILURE IN CMOS RAM for seven seconds and restores factory
+  settings. (I first wrote that it was lost at every power-on: an assumption,
+  corrected by the person holding the Pocket.) `docs/core-design.md` section 8.
+- **0.1.0's power-on SRAM test damages one CMOS word per start** (the head of
+  the high-score table): it wrote its pattern at SRAM 0x10000 and did not put
+  back what was there. `target/pocket/sram_selftest.sv` now does, checked by
+  `sim/run_mem.sh`; that is in the tree, not in the 0.1.0 bitstream.
 - The 6809 sometimes waits for its ROM: about two stretched cycles a frame
   in play, of 36,500 (`docs/bringup.md`, square 24). Inaudible is the
   expectation, not a measurement.

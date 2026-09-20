@@ -26,7 +26,7 @@ Timed from the end of the download, at 54.7 frames a second:
 |---|---|
 | 0-2 s | the power-up RAM test: the whole picture flashes through solid colours and fine patterns. **This is the frame buffer being tested, not a fault.** |
 | 2-20 s | white text on black: `SMASH TV REVISION 8.00`, then the CPU, RAM and ROM checks reporting in turn (`CHECKING ROMS` with a list of chip numbers) |
-| 20-27 s | **`FAILURE IN CMOS RAM`** in red and `DEFAULT ADJUSTMENTS RESTORED.` - the game finding a blank battery-backed RAM, exactly as MAME does with no saved NVRAM. Expected on every power-on until the CMOS is saved to the card. |
+| 20-27 s | **`FAILURE IN CMOS RAM`** in red and `DEFAULT ADJUSTMENTS RESTORED.` - the game finding a blank battery-backed RAM, exactly as MAME does with no saved NVRAM. Expected when the SRAM is blank; on hardware the SRAM keeps the CMOS between restarts, and then this screen does not appear. |
 | 28 s on | attract mode. **Silent** - the board makes no sound until a coin goes in. |
 
 Select is the coin (a sound plays, `CREDITS: 1`), Start starts. The d-pad
@@ -121,6 +121,14 @@ chip, and main RAM and the CMOS are landing on top of each other.
   bring-up entries came off the menu for the release; they are still wired in
   `core_top.sv` (modifier word bits 3, 4, 5, 7 and 15), and putting the five
   entries back in `interact.json` needs no rebuild.
+- 2026-09-20, 0.1.0: **settings persist between restarts** - against what I had
+  written in the release notes (that they were lost every power-on).  The CMOS
+  is in the SRAM and the SRAM keeps its contents.  Which showed a defect of
+  mine: the power-on self-test wrote 5AA5 over SRAM 0x10000, the first CMOS
+  word (0x0022 in a MAME NVRAM: the head of the high-score table), at every
+  start.  The test now puts back both words (`sram_selftest.sv`; `sim/run_mem.sh`
+  checks the patterns read back AND that BEEF/0022 are left as found).  Not yet
+  on hardware.
 
 Date, build md5, what was seen, what it ruled out. One line each. The theories
 that died belong here as much as the one that lived.

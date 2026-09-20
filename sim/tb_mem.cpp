@@ -60,7 +60,7 @@ int main(int argc, char **argv) {
     dut = new Vtb_mem_top;
     dut->init = 1; dut->rd_late = 1; dut->burst_slow = 0;
     dut->dl_we = 0; dut->dl_active = 1;
-    dut->mrom_req = dut->srom_req = dut->gfx_req = dut->xm_req = dut->ram_req = 0;
+    dut->mrom_req = dut->srom_req = dut->gfx_req = dut->xm_req = dut->ram_req = 0; dut->st_run = 0;
     for (int i = 0; i < 16; i++) tick();
     dut->init = 0;
     long t = 0; while (!dut->ready && t++ < 200000) tick();
@@ -190,6 +190,19 @@ int main(int argc, char **argv) {
     if (ram(false, 0x00005, 0, 3) != 0x1111 || ram(false, 0x10005, 0, 3) != 0x2222) { sbad++; printf("  sram A16 aliases\n"); }
     ram(true, 5, 0xFFFF, 3); ram(true, 5, 0x00AB, 1);            // low byte only
     if (ram(false, 5, 0, 3) != 0xFFAB) { sbad++; printf("  sram byte enables: got %04X want FFAB\n", dut->ram_q); }
+    // core_top's power-on test, on this port: it must read back its two
+    // patterns, and it must leave both words as it found them - the second is
+    // the first word of the game's CMOS, which survives a core reset.
+    ram(true, 0x00000, 0xBEEF, 3); ram(true, 0x10000, 0x0022, 3);
+    dut->st_run = 1;
+    { int g = 0; while (!dut->st_done && g++ < 400000) tick(); }
+    const uint16_t r0 = dut->st_rd0, r1 = dut->st_rd1;       // before st_run drops and clears them
+    const bool st_pass = dut->st_done && r0 == 0xA55A && r1 == 0x5AA5;
+    dut->st_run = 0; tick();
+    const uint16_t k0 = ram(false, 0x00000, 0, 3), k1 = ram(false, 0x10000, 0, 3);
+    printf("SRAM self-test: read back %04X %04X (want A55A 5AA5); left behind %04X %04X (want BEEF 0022)\n",
+           r0, r1, k0, k1);
+    if (!st_pass || k0 != 0xBEEF || k1 != 0x0022) sbad++;
     printf("SRAM:  %ld wrong\n", sbad);
 
     delete dut;

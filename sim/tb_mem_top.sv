@@ -28,13 +28,24 @@ module tb_mem_top (
     input  logic [16:0] ram_addr, input  logic [15:0] ram_d,
     input  logic  [1:0] ram_be,
     output logic        ram_ack,  output logic [15:0] ram_q,
-    output logic [15:0] gfx_flushes, srom_misses, mrom_misses
+    output logic [15:0] gfx_flushes, srom_misses, mrom_misses,
+    // core_top's power-on SRAM test, on the same port, when st_run is high
+    input  logic        st_run,
+    output logic        st_done,
+    output logic [15:0] st_rd0, st_rd1
 );
     wire [15:0] SDRAM_DQ; wire [12:0] SDRAM_A; wire [1:0] SDRAM_BA;
     wire        SDRAM_DQML, SDRAM_DQMH, SDRAM_nCS, SDRAM_nWE, SDRAM_nRAS, SDRAM_nCAS;
     wire        SDRAM_CKE, SDRAM_CLK;
     wire [16:0] sram_a; wire [15:0] sram_dq;
     wire        sram_oe_n, sram_we_n, sram_ub_n, sram_lb_n;
+
+    logic t_req, t_we; logic [16:0] t_addr; logic [15:0] t_d;
+    sram_selftest u_st (
+        .clk(clk), .hold(!st_run),
+        .req(t_req), .we(t_we), .addr(t_addr), .d(t_d), .ack(ram_ack), .q(ram_q),
+        .done(st_done), .rd0(st_rd0), .rd1(st_rd1)
+    );
 
     smashtv_mem dut (
         .clk(clk), .clk_sdram(clk), .init(init), .ready(ready),
@@ -45,7 +56,8 @@ module tb_mem_top (
         .gfx_req(gfx_req), .gfx_addr(gfx_addr), .gfx_ack(gfx_ack), .gfx_q(gfx_q),
         .xm_req(xm_req), .xm_we(xm_we), .xm_addr(xm_addr), .xm_d(xm_d), .xm_be(xm_be),
         .xm_ack(xm_ack), .xm_q(xm_q),
-        .ram_req(ram_req), .ram_we(ram_we), .ram_addr(ram_addr), .ram_d(ram_d), .ram_be(ram_be),
+        .ram_req(st_run ? t_req : ram_req), .ram_we(st_run ? t_we : ram_we),
+        .ram_addr(st_run ? t_addr : ram_addr), .ram_d(st_run ? t_d : ram_d), .ram_be(st_run ? 2'b11 : ram_be),
         .ram_ack(ram_ack), .ram_q(ram_q),
         .gfx_flushes(gfx_flushes), .srom_misses(srom_misses), .mrom_misses(mrom_misses),
         .SDRAM_DQ(SDRAM_DQ), .SDRAM_A(SDRAM_A), .SDRAM_BA(SDRAM_BA),
