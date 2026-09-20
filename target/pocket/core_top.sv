@@ -855,9 +855,12 @@ module core_top
     //!   IN0  bits 3-0 P1 move R L D U, 7-4 P1 fire R L D U, 15-8 the same for P2
     //!   IN1  0 coin 1, 1 coin 2, 2 start 1, 3 tilt, 4 service mode,
     //!        5 start 2, 6 service credit, 7 bill validator
-    //! Select is the coin.  The menu's Service is the service-mode button
-    //! (bit 4), which is momentary; the test switch proper is a DIP on this
-    //! board (DSW bit 15).
+    //! Select is the coin.  The menu's Service Button is the service-mode
+    //! button (bit 4): measured on sim/run_machine.sh, ten frames of it in
+    //! attract brings up the game's DIAGNOSTIC TESTS menu (switch test, CPU
+    //! board, sound board, monitor patterns, burn-in), which the sticks and
+    //! buttons then drive.  It is a level from the menu, so turn it on and
+    //! off again.
     wire [15:0] g_in0 = ~{p2_btn_a, p2_btn_y, p2_btn_b, p2_btn_x,
                           p2_right | j2_right, p2_left | j2_left,
                           p2_down  | j2_down,  p2_up   | j2_up,
@@ -868,11 +871,13 @@ module core_top
                           p1_start, p2_select, p1_select};
 
     //! The two DIP banks, as one word.  The menu word starts at zero and is
-    //! XORed with the board's factory setting - every switch off, 0xFFFF - so
-    //! nothing set is the board as it shipped.  The only switch the menu
-    //! offers is the test switch, DS2:1, bit 15: the coinage switches are
-    //! read only by a factory restore and the rest are unknown
-    //! (docs/hardware.md section 3, METHODOLOGY section 5.5).
+    //! XORed with the board's factory setting - every switch off, 0xFFFF.  The
+    //! menu offers NONE of them: the coinage switches are read only by a
+    //! factory restore, the rest are unknown, and the test switch (DS2:1, bit
+    //! 15) was tried - on from power-up, MAME and this core both go to attract
+    //! mode exactly as with it off (METHODOLOGY section 5.5: an entry is a
+    //! claim that it does something).  The word is still wired, so an entry
+    //! can be added the day one is shown to matter.
     wire [15:0] g_dsw = 16'hFFFF ^ {dip_sw1, dip_sw0};
 
     //! Bring-up switches from the modifier word (the "Bring-up" entries of

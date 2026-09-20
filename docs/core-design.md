@@ -35,9 +35,9 @@ The rest of the enables, from 96 MHz:
 |---|---|---|---|
 | dot | 8 MHz | ÷ 12 | **yes** |
 | MC6809E | 2.000 MHz | ÷ 48 | **yes** |
-| TMS34010 machine state | 5.000 MHz | ÷ 19.2 | no — fractional accumulator |
+| TMS34010 machine state | 5.000 MHz | ÷ 19.2 | five pulses in 96 clocks: exact on average |
 | YM2151 | 3.579545 MHz | ÷ 26.82 | no — fractional accumulator |
-| blitter pixel | 24.39 MHz (41 ns) | ÷ 3.936 | no — fractional accumulator |
+| blitter pixel | 24.375 MHz (41.03 ns) | × 65/256 | 0.06% slow |
 
 The two that matter are exact. The 6809's rate **is** the CVSD's sample rate
 (`docs/hardware.md` §1), so it gets an exact divider and a memory that never
@@ -81,11 +81,12 @@ these cores to drive the chip's seventeenth address line**
 (`target/pocket/sram_port.sv` had a 16-bit address). `core_top`'s power-on
 self-test writes one word either side of it and shows both on the panel.
 
-Block RAM: 132,096 words of frame buffer + 4,096 of palette + 2 KB of sound
-RAM. In M10K blocks at 16 bits wide (512 words each) that is **258 + 8 + 2 =
-268 of the 5CEBA4's 308**, 87%. That is the design's main risk and the first
-full fit is the measurement that settles it; if it does not fit, the fallback
-is §3's option B, which costs bandwidth instead of blocks.
+**Measured, ninth compile:** 301 of the 5CEBA4's 308 block RAMs (98%) - 258
+of them the frame buffer, as reckoned, the rest the palette, the two ROM
+caches, the sound RAM, jt51's shift registers and the framework - and 11,527
+of 18,480 ALMs (62%). Block RAM is what this design is short of: seven blocks
+are all that is left, and a bigger cache or the CMOS in block RAM is not on
+offer. §3's option B is the way out if something large ever has to come in.
 
 ---
 
@@ -177,9 +178,11 @@ client's ack is asserted. **Zero is not the expected answer; surviving it is.**
   the Pocket's controls menu.
 - **Menu**: the DIP bank is *not* transcribed whole. `docs/hardware.md` §3
   says the coinage switches are read only by a full factory restore, and the
-  rest of both banks is unknown. So the menu offers the test switch and
-  nothing else until something is shown to do something (METHODOLOGY §5.5,
-  "every menu entry is a claim that the gateware does something").
+  rest of both banks is unknown, and the test switch was tried and does
+  nothing visible in MAME or here. So the menu offers no DIP at all, and a
+  **Service Button** instead, which is measured to open the game's
+  DIAGNOSTIC TESTS menu (METHODOLOGY §5.5, "every menu entry is a claim that
+  the gateware does something").
 - **Audio**: one mono channel, YM2151 + DAC + CVSD mixed at MAME's weights
   (`docs/hardware.md` §6). It crosses into the Pocket's audio domain through
   the 48 kHz hold and toggle hand-over in `core_top.sv` — METHODOLOGY §5.4,
@@ -230,3 +233,29 @@ good:
 - **The watchdog** (`docs/hardware.md` §10). Nothing resets the game if the
   program hangs, and nothing resets it when the menu has been open a long
   time either.
+
+---
+
+## 9. How it is timed
+
+96 MHz is 10.4 ns, and three blocks in this machine are not 10.4 ns blocks.
+Each is enabled one clock in several, written so that its inputs are still
+when it looks at them, and given that many clocks in
+`projects/smashtv_pocket.sdc` - which says, for each, exactly which registers
+are in and which are out. **The RTL and the SDC are one contract; change one
+and read the other.**
+
+| block | enabled | SDC gives | what makes that true |
+|---|---|---|---|
+| `tms34010` | one step in ≥ 3 clocks | 3 | every register of the machine proper is under `step`; the bus handshake, the display-interrupt pulse, the cycle balance and the local reset see every clock and are excluded by name |
+| `mc6809e` (vendored) | once in 48 clocks | 4 | it reads through `din_r`, whose sources are still for 5 clocks before the cycle ends; nothing acts on its address bus for the first 5 |
+| `jt51` (vendored) | its `cen`, 26-54 clocks | 2 | its register writes are raised on the clock after an enable |
+
+Retiming is kept out of the two CPUs (`ADV_NETLIST_OPT_ALLOWED` in the qsf):
+it moved registers across those boundaries and made one-clock paths of them.
+
+What the stepping costs is CPU time in tight loops of one-cycle instructions
+on slow memory, which in this game is the power-up RAM test and nothing else
+measured: 85-91% of MAME's CPU speed there on the Pocket's memories, 98-100%
+in attract and play (`sim/run_pocket.sh`). The program-ROM cache exists to
+pay for it: without it play ran at 90-94%.

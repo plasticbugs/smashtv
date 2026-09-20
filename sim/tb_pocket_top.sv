@@ -101,6 +101,17 @@ module tb_pocket_top (
     end
     final $display("graphics-port ack/request coincidences: %0d", gfx_races);
 
+    // what the bring-up panel's row 2 will show (docs/bringup.md)
+    logic seen_p, seen_s, seen_g;
+    always_ff @(posedge clk) begin
+        if (reset) begin seen_p <= 1'b0; seen_s <= 1'b0; seen_g <= 1'b0; end
+        else begin
+            if (mrom_ack && !seen_p) begin seen_p <= 1'b1; $display("first program ROM word fetched: %04x", mrom_q); end
+            if (srom_ack && !seen_s) begin seen_s <= 1'b1; $display("first sound ROM byte fetched: %02x", srom_q); end
+            if (gfx_ack  && !seen_g) begin seen_g <= 1'b1; $display("first graphics word fetched: %08x (address %05x)", gfx_q, gfx_addr); end
+        end
+    end
+
     /* verilator lint_off UNUSEDSIGNAL */
     wire unused = ^{dram_clk};
     /* verilator lint_on UNUSEDSIGNAL */

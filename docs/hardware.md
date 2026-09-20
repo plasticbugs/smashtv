@@ -194,6 +194,14 @@ menu entry is a claim that the gateware does something."
 
 Factory default is all switches off, i.e. **0xFFFF**.
 
+*(Measured.)* The **test switch does nothing visible**: with DSW reading 0x7FFF
+from power-up (and a blank CMOS), MAME goes through the same boot to the same
+attract mode as with it off, and so does the RTL. The way into the game's
+tests is the **service-mode button, IN1 bit 4**: ten frames of it during
+attract bring up DIAGNOSTIC TESTS - switch test, CPU board test, sound board
+test, monitor patterns, burn-in - driven by "any stick" and "any button"
+(`artifacts/machine/service_menu.png`, from `SVC=1560 sim/run_machine.sh`).
+
 ### A blank CMOS *(measured)*
 
 With the battery-backed RAM all zeros - MAME's default when it has no saved

@@ -3,7 +3,8 @@
 **Smash T.V.**, Williams 1990, on **Midway Y-Unit** hardware: a TMS34010
 graphics processor driving a 512×512 frame buffer through a custom Williams
 DMA blitter, with a Williams CVSD sound board (MC6809E, YM2151, HC-55516,
-MC1408) alongside. The gateware here is **not finished** — see Status.
+MC1408) alongside. The gateware is whole and builds, and **has not yet run on
+a Pocket** — see Status.
 
 > **ROMs are not included and never will be.** You supply your own MAME
 > `smashtv` romset; the core reads one image built from it.
@@ -14,20 +15,23 @@ MC1408) alongside. The gateware here is **not finished** — see Status.
 | Williams DMA blitter | `rtl/stv_blit.sv` | `sim/run_video.sh`: index-identical to the reference renderer on 68 frames in 8 windows, at 4.00 clocks per source pixel against the board's 3.936 |
 | frame buffer, two planes | `rtl/stv_vram.sv` | the same gate; block RAM for rows 0-255 and the autoerase templates, SDRAM for rows 256-509 |
 | raster, scanout, palette | `rtl/stv_video.sv` | the same gate; 410×256 at 54.7069 Hz off an 8.000 MHz dot clock, which is the board's exactly |
-| the main board as a whole | `rtl/stv_main.sv` | `sim/run_machine.sh`: 2000 frames from reset on ideal memories - power-up tests, attract, coin, start, play - pixel-identical to MAME on every frame compared but one (4 pixels), and all 80 words it sends the sound board identical to MAME's in value and frame |
+| the main board as a whole | `rtl/stv_main.sv` | `sim/run_machine.sh`: 2000 frames from reset on ideal memories - power-up tests, attract, coin, start, play. Before the CPU was re-timed: pixel-identical to MAME on every frame compared but one (4 pixels), and all 80 words to the sound board identical in value and frame. After: the same words, the coin sound one frame late, play frames identical or 4 pixels off (see Status) |
 | MC6809E, YM2151, HC-55516, MC1408, 6821 | `rtl/stv_sound.sv` with `modules/cpu-mc6809`, `modules/sound-jt51`, `rtl/hc55516.sv`, `rtl/pia6821.sv` | `sim/run_sound.sh`: MAME's commands replayed, a whole minute including 28 s of play compared second by second and band by band - within 4% of MAME below 6 kHz |
 | ROMs, RAM, CMOS | Pocket SDRAM and SRAM (`target/pocket/smashtv_mem.sv`) | `sim/run_mem.sh`: the image at the loader's real rate, every port read back, all clients at once; image byte-identical to MAME's |
-| the core on the Pocket's memories | `rtl/smashtv_core.sv` on `smashtv_mem` | `sim/run_pocket.sh`: boots, passes the game's own RAM, ROM and custom-chip tests, takes a coin and plays, with the CPU at 99-100% of MAME's speed in attract and play |
+| the core on the Pocket's memories | `rtl/smashtv_core.sv` on `smashtv_mem` | `sim/run_pocket.sh`: boots, passes the game's own RAM, ROM and custom-chip tests, takes a coin and plays, with the CPU at 98-100% of MAME's speed in attract and play |
+| the build | Quartus 18.1, `./build-local.sh compile` | fits (62% ALMs, 301/308 block RAMs); timing closed in every corner; every constraint applied |
 
 One row per part of the board. The right-hand column is the point of the
 table: it says what checks each part, and where it says nothing, nothing does.
 
 ## Status
 
-**It has never run on a Pocket.** Everything below is simulation against MAME.
-The whole machine is in the core and boots in simulation on the Pocket's real
-memory controllers; the first full compile fits the device; **timing at
-96 MHz is not closed yet**, and until it is there is nothing to flash.
+**It has never run on a Pocket.** Everything below is simulation against MAME
+and a Quartus build. The whole machine is in the core; it boots, takes a coin
+and plays in simulation on the Pocket's real memory controllers; and the
+build **fits and closes timing at 96 MHz in every corner** (62% of the logic,
+301 of the 308 block RAMs, +0.40 ns setup, +0.11 ns hold). The next step is a
+first flash, with `docs/bringup.md` in hand.
 
 Proven, and by what:
 
@@ -71,20 +75,24 @@ Proven, and by what:
 
 Not proven:
 
-- **Timing.** The first compile fit (94% of the logic, 94% of the block RAM)
-  and missed 96 MHz by 9 ns, all of it inside the TMS34010. The CPU now
-  advances one clock in three with its paths constrained to match, and is
-  half the size it was; whether that closes is the next compile's to say.
+- **Anything on hardware.** No build of this core has been on a Pocket. The
+  SDRAM and SRAM controllers are proven there in other cores; this is the
+  first to use the SRAM's seventeenth address line, and the power-on
+  self-test is there to say whether it works.
+- **Frame-exactness with the timed CPU.** To close timing the TMS34010
+  advances one clock in three. It is held to MAME instruction for
+  instruction, transaction for transaction and cycle for cycle
+  (`sim/run_cpu.sh`), but it runs the power-up RAM test at 93-96% of MAME's
+  speed (85-91% on the Pocket's memories), so the boot ends 19 frames later
+  than MAME's (51 on the Pocket's memories) and frames after it line up with
+  MAME's only to within a frame or three. The frame-for-frame identity
+  through 2000 frames was measured on the CPU before that change.
 - **The CMOS is not saved.** Every power-on shows FAILURE IN CMOS RAM for
   seven seconds and restores factory settings; high scores are lost.
   `docs/core-design.md` section 8.
-- On the Pocket's memories the power-up tests run at 87-94% of MAME's speed
-  (they hammer the frame buffer through the CPU), so the boot is about 1.3 s
-  longer than MAME's and the frames after it cannot be compared with MAME's
-  one for one. Attract and play run at 99-100%.
-- The 6809 sometimes waits for its ROM (`docs/bringup.md`, square 24). A
-  cache with prefetch is in front of it; how often it still waits in play
-  is being measured.
+- The 6809 sometimes waits for its ROM: about two stretched cycles a frame
+  in play, of 36,500 (`docs/bringup.md`, square 24). Inaudible is the
+  expectation, not a measurement.
 - Three parts of the video model are **unverified rather than correct**: the
   autoerase lag (±1 raster line makes no difference to any captured frame),
   which of the two template rows a row is erased from, and autoerase being
@@ -93,8 +101,9 @@ Not proven:
 - Two blitter command bits are followed rather than understood: bit 5
   ("flip y") and bit 11. `docs/hardware.md` section 10. INT2's source and the
   watchdog likewise.
-- Nothing past frame 2000, no second player, no test menu, and neither menu
-  entry that reaches the test menu has been exercised.
+- Nothing past frame 2000 and no second player. The service button is shown
+  to open the game's test menu (`artifacts/machine/service_menu.png`); what is
+  in that menu has not been run.
 
 ## Building the ROM image
 
