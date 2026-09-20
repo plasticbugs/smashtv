@@ -902,5 +902,7 @@ set_instance_assignment -name AUTO_SHIFT_REGISTER_RECOGNITION OFF -to "core_top:
 # knowing that: in the fourth compile it pulled the TMS34010's register-read
 # multiplexers' registers back towards the core's reset and made a -5.6 ns
 # one-clock path out of it (reset -> tms34010|r_s[*]~..._OTERM).  So not here.
-set_instance_assignment -name ALLOW_REGISTER_RETIMING OFF -to "core_top:ic|smashtv_core:u_core|stv_main:u_main|tms34010:u_cpu"
-set_instance_assignment -name ALLOW_REGISTER_RETIMING OFF -to "core_top:ic|smashtv_core:u_core|stv_sound:u_snd|mc6809e:cpu"
+# (Quartus 18.1 has no per-instance ALLOW_REGISTER_RETIMING for this family -
+# it refuses to open the project; this is the assignment that exists.)
+set_instance_assignment -name ADV_NETLIST_OPT_ALLOWED "NEVER ALLOW" -to "core_top:ic|smashtv_core:u_core|stv_main:u_main|tms34010:u_cpu"
+set_instance_assignment -name ADV_NETLIST_OPT_ALLOWED "NEVER ALLOW" -to "core_top:ic|smashtv_core:u_core|stv_sound:u_snd|mc6809e:cpu"

@@ -1,6 +1,7 @@
 #!/bin/sh
 # The whole main board from reset on ideal memories (CLAUDE.md step 6).
-#   sim/run_machine.sh <frames> [every]      pictures land in artifacts/machine/
+#   sim/run_machine.sh <frames> [every]      pictures land in artifacts/machine/ (or $OUT)
+#   DSW=0x7fff ... the test switch on;  SVC=1500 ... the service button at that frame
 set -e
 here=$(cd "$(dirname "$0")" && pwd); root=$(cd "$here/.." && pwd); cd "$here"
 rom="$root/.build/smashtv.rom"
@@ -11,7 +12,7 @@ verilator --cc --exe --build -j "${JOBS:-8}" -O3 \
     --top-module tb_machine_top -Mdir obj_machine \
     ../rtl/stv_main.sv ../rtl/tms34010.sv ../rtl/stv_video.sv ../rtl/stv_vram.sv ../rtl/stv_blit.sv \
     tb_machine_top.sv tb_machine.cpp > obj_machine.log 2>&1 || { tail -40 obj_machine.log; exit 1; }
-out="$root/artifacts/machine"; mkdir -p "$out"; rm -f "$out"/rtl_*.rgb
+out="${OUT:-$root/artifacts/machine}"; mkdir -p "$out"; rm -f "$out"/rtl_*.rgb
 ./obj_machine/Vtb_machine_top "$rom" "$out" "${1:-100}" "${2:-50}"
 python3 - "$out" <<'PY'
 import sys, os, re

@@ -33,7 +33,11 @@ int main(int argc, char **argv) {
       if (fread(rom.data(), 1, rom.size(), f) != rom.size()) return 2; fclose(f); }
 
     dut = new Vtb_machine_top;
-    dut->rst = 1; dut->in0 = dut->in1 = dut->dsw = 0xffff;
+    // DSW=0x7fff runs with the test switch (DS2:1, bit 15) on; SVC=<frame> presses
+    // the service-mode button (IN1 bit 4) for ten frames from that frame
+    const uint16_t dsw = getenv("DSW") ? uint16_t(strtoul(getenv("DSW"), nullptr, 0)) : 0xffff;
+    const long svc = getenv("SVC") ? atol(getenv("SVC")) : -1;
+    dut->rst = 1; dut->in0 = dut->in1 = 0xffff; dut->dsw = dsw;
     dut->ld_prog_we = dut->ld_gfx_we = 0;
     for (int i = 0; i < 4; i++) tick();
     for (uint32_t w = 0; w < 0x20000; w++) {
@@ -107,6 +111,7 @@ int main(int argc, char **argv) {
                 if ((f / 30) % 2 == 0) i0 &= ~0x0080;                  // fire right
                 if ((f / 47) % 2 == 0) i0 &= ~0x0001;                  // move up
             }
+            if (svc >= 0 && f >= svc && f < svc + 10) i1 &= ~0x0010;      // service mode
             dut->in0 = i0; dut->in1 = i1;
             if (y > 0 && (frame % every == 0 || frame == nframes || (frame >= dense0 && frame <= dense1))) {
                 char name[512]; snprintf(name, sizeof(name), "%s/rtl_%05ld_%dx%d.rgb", out.c_str(), frame, maxx, y);
