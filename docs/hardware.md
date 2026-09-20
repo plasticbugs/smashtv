@@ -560,6 +560,30 @@ attract mode, the high-score table, a coin-up and a played game.)*
 - Input ports IN0, IN1 and DSW.
 - The CPU's own transparent pixel writes (CONTROL bit 5 set, PSIZE 8).
 
+**The TMS34010 instructions it executes.** *(Measured with MAME's debugger
+trace over twelve windows of twelve frames — reset, the RAM and ROM tests, the
+CPU drawing text, a screen clear, title, attract, coin-up, game start and two
+of play: 5,145,825 instructions.)* 86 mnemonics in 130 operand forms. In
+order of frequency: MOVE (16 addressing forms, of which register-register,
+`R,*R+`, `*R(n),R`, `*R,R`, `*R+,R` and `@n,R` are 97%), DSJS, the sixteen
+conditional jumps, SLA, ADDC, CMP, SRL, ANDI, ZEXT, MOVI, ORI, OR, ADD,
+MMTM/MMFM (always through SP bar seven MMFMs through A8), RETS, CALLA,
+SUBXY/ADDXY/CMPXY, CLR, MOVX/MOVY, SLL, ADDI, DEC, INC, RETI, BTST, CALLR,
+CMPI, MOVB (five forms), MPYU, NEG, MOVK, DINT/EINT, AND, PUSHST/POPST, XOR,
+ADDK/SUBK, MPYS, JUMP, SUB, NOT, DSJ, SETF, ANDN, TRAP, RL, EXGPC, GETPC,
+CLRC/SETC, DIVU, ABS, SEXT, CALL, LMO, EXGF, CVXYL, DIVS.
+
+Field sizes set with SETF are only ever 16 and 32, but the power-up RAM test
+loads the field size from a table in ROM with EXGF, so the general 1-to-32-bit
+field machinery has to work or the game fails its own memory test.
+
+The CPU's own graphics instructions are nearly unused: **PIXT `*R,R`** 92
+times in the game proper, and then — only inside the power-up self-test at
+`0xFFF4F8xx-0xFFF4FExx` — DRAV 100 times, FILL XY 6, PIXBLT B,XY 5 and
+PIXT `R,*R,XY` once. LINE, the other five PIXBLT forms, FILL L, CPW and the
+other PIXT forms never execute. Everything the player sees is drawn by the
+board's blitter, not by the graphics processor's graphics instructions.
+
 **Not used, and therefore not built** — each of these must be re-checked
 before it is left out for good:
 
