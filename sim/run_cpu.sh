@@ -36,7 +36,7 @@ mkfifo "$dir/trace_bus.bin" "$dir/trace_reg.txt"
 TRACE_DIR="$dir" TRACE_N=2000000000 "$root/tools/mame.sh" \
     -autoboot_script "$root/tools/bus_trace.lua" -seconds_to_run "$live" >/dev/null 2>&1 &
 p1=$!
-TRACE_DIR="$dir" TRACE_FRAMES=100000000 "$root/tools/mame.sh" -debug -debugger none \
+CYCLES=1 TRACE_DIR="$dir" TRACE_FRAMES=100000000 "$root/tools/mame.sh" -debug -debugger none \
     -autoboot_script "$root/tools/cpu_trace.lua" -seconds_to_run "$live" >/dev/null 2>&1 &
 p2=$!
 rc=0

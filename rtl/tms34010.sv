@@ -226,7 +226,7 @@ module tms34010 #(
             // 0x0f80 PIXBLT B,L  0x0fa0 PIXBLT B,XY  0x0fc0 FILL L  0x0fe0 FILL XY
             // (the pixel-array-to-pixel-array PIXBLTs at 0x0f00-0x0f6f are
             // not built: measured, this game never executes one)
-            16'b0000_1111_1??0_????: begin kind = K_GFX; cyc = 6'd6; end
+            16'b0000_1111_1??0_????: begin kind = K_GFX; cyc = 6'd0; end   // charged in G_INIT and per row
 
             // ---- 0x1000 .. 0x3fff: a 5-bit constant and a register
             16'b0001_00??_????_????: begin kind = K_ADDK; end
@@ -253,7 +253,7 @@ module tms34010 #(
             16'b0101_001?_????_????: begin kind = K_ANDN; end
             16'b0101_010?_????_????: begin kind = K_OR; end
             16'b0101_011?_????_????: begin kind = K_XOR; end
-            16'b0101_100?_????_????: begin kind = K_DIVS; cyc = 6'd40; end
+            16'b0101_100?_????_????: begin kind = K_DIVS; cyc = ir[0] ? 6'd39 : 6'd40; end   // 32-bit form (odd Rd) is 39
             16'b0101_101?_????_????: begin kind = K_DIVU; cyc = 6'd37; end
             16'b0101_110?_????_????: begin kind = K_MPYS; cyc = 6'd20; end
             16'b0101_111?_????_????: begin kind = K_MPYU; cyc = 6'd21; end
@@ -427,9 +427,16 @@ module tms34010 #(
     // repaid by the register-only instructions around it, which finish in
     // half theirs.  Without the credit the power-up tests ran 6% behind
     // MAME: the machine's frame 640 was MAME's frame 600.
-    localparam logic signed [10:0] CREDIT = -11'sd64;
-    logic signed [10:0] bal;
-    logic         [7:0] cyc_add;        // cycles this clock adds to the debt
+    //
+    // The balance is wide because FILL and PIXBLT owe a great deal at once: a
+    // full-screen FILL is 262,000 cycles, and the writes themselves take a
+    // fraction of that.  It was 11 bits, which wrapped after about three rows
+    // of a large FILL and forgot the debt - the machine ran AHEAD of MAME
+    // wherever the program clears a screen (12 ms by the end of the power-up
+    // tests, measured from the core's own sound-command log).
+    localparam logic signed [27:0] CREDIT = -28'sd64;
+    logic signed [27:0] bal;
+    logic        [15:0] cyc_add;        // cycles this clock adds to the debt
     logic               cyc_stb;
     // every cycle ever charged, for the bench to hold against MAME's count
     // (sim/tb_cpu.cpp); nothing reads it, so synthesis removes it
@@ -692,6 +699,13 @@ module tms34010 #(
     logic [31:0] g_saddr, g_daddr, g_dacc;
     logic [27:0] g_sword, g_dword;
     logic [15:0] g_srcw, g_dstw, g_y, g_fw, g_fwc;
+    // what MAME charges for one row: `op timing` (2, or 4 with transparency)
+    // per destination word, a partial word counting as a word, and for a
+    // PIXBLT B two more per source word, of which it reckons there are
+    // dstwords * psize / 16
+    wire  [15:0] g_dw     = g_fw + {15'd0, g_lp != 5'd0} + {15'd0, g_rp != 5'd0};
+    wire  [15:0] g_rowcyc = (io_control[5] ? (g_dw << 2) : (g_dw << 1))
+                          + (g_fill ? 16'd0 : ((g_dw >> (3'd4 - g_l2)) << 1));
     logic  [4:0] g_lp, g_rp, g_cnt;
     logic  [3:0] g_sbit, g_dpos;
     logic  [1:0] g_seg;
@@ -743,9 +757,9 @@ module tms34010 #(
         if (dpyint) io_intpend[10] <= 1'b1;
 
         cyc_stb <= 1'b0;
-        if (cyc_stb) cyc_total <= cyc_total + {24'd0, cyc_add};
-        bal <= bal + (cyc_stb ? $signed({3'd0, cyc_add}) : 11'sd0)
-                   - ((cen && bal > CREDIT) ? 11'sd1 : 11'sd0);
+        if (cyc_stb) cyc_total <= cyc_total + {16'd0, cyc_add};
+        bal <= bal + (cyc_stb ? $signed({12'd0, cyc_add}) : 28'sd0)
+                   - ((cen && bal > CREDIT) ? 28'sd1 : 28'sd0);
 
         if (rst) begin
             state <= S_RESET; st <= 32'h0000_0010; pc <= '0; sp <= '0;
@@ -783,7 +797,7 @@ module tms34010 #(
             end
             // extension words, then execute.  `next` is combinational on ir.
             S_EXT: begin
-                if (ext_i == 3'd0 && !ext_seen) begin cyc_add <= {2'd0, cyc}; cyc_stb <= 1'b1; ext_seen <= 1'b1; end
+                if (ext_i == 3'd0 && !ext_seen) begin cyc_add <= {10'd0, cyc}; cyc_stb <= 1'b1; ext_seen <= 1'b1; end
                 if (ext_i == next) begin
                     state <= S_EXEC;
                 end else if (!bus_req) begin
@@ -802,7 +816,7 @@ module tms34010 #(
                 vec_addr    <= irq_vec;
                 push_st_too <= 1'b1;
                 ret_pc      <= pc;
-                cyc_add     <= 8'd16; cyc_stb <= 1'b1;
+                cyc_add <= 16'd16; cyc_stb <= 1'b1;
                 // push PC
                 sp <= sp - 32'd32;
                 fe_addr <= sp - 32'd32; fe_size <= 6'd32; fe_wr <= 1'b1; fe_wdata <= pc;
@@ -919,13 +933,13 @@ module tms34010 #(
                         `SET_REG(fR, rd, r_d - 32'd1)
                         if (r_d != 32'd1)
                             pc <= ir[10] ? (pc - {23'd0, kf, 4'd0}) : (pc + {23'd0, kf, 4'd0});
-                        else begin cyc_add <= 8'd1; cyc_stb <= 1'b1; end   // 3, not 2
+                        else begin cyc_add <= 16'd1; cyc_stb <= 1'b1; end   // 3, not 2
                     end
                     K_DSJ, K_DSJEQ, K_DSJNE: begin
                         if ((kind == K_DSJ) || (kind == K_DSJEQ && Z) || (kind == K_DSJNE && !Z)) begin
                             `SET_REG(fR, rd, r_d - 32'd1)
                             if (r_d != 32'd1) begin
-                                state <= S_JREAD; cyc_add <= 8'd1; cyc_stb <= 1'b1;
+                                state <= S_JREAD; cyc_add <= 16'd1; cyc_stb <= 1'b1;
                             end else pc <= pc + 32'd16;
                         end else pc <= pc + 32'd16;
                     end
@@ -934,15 +948,15 @@ module tms34010 #(
                         // absolute 3 and 4.  Decode charged 1 already.
                         cyc_stb <= 1'b1;
                         if (ir[7:0] == 8'h00) begin           // 16-bit relative
-                            if (take) begin state <= S_JREAD; cyc_add <= 8'd2; end
-                            else      begin pc <= pc + 32'd16; cyc_add <= 8'd1; end
+                            if (take) begin state <= S_JREAD; cyc_add <= 16'd2; end
+                            else      begin pc <= pc + 32'd16; cyc_add <= 16'd1; end
                         end else if (ir[7:0] == 8'h80) begin  // absolute
-                            if (take) begin state <= S_JREAD; cyc_add <= 8'd2; end
-                            else      begin pc <= pc + 32'd32; cyc_add <= 8'd3; end
+                            if (take) begin state <= S_JREAD; cyc_add <= 16'd2; end
+                            else      begin pc <= pc + 32'd32; cyc_add <= 16'd3; end
                         end else begin                         // 8-bit relative
                             if (take) begin
-                                pc <= pc + {{20{ir[7]}}, ir[7:0], 4'd0}; cyc_add <= 8'd1;
-                            end else cyc_add <= 8'd0;
+                                pc <= pc + {{20{ir[7]}}, ir[7:0], 4'd0}; cyc_add <= 16'd1;
+                            end else cyc_add <= 16'd0;
                         end
                     end
 
@@ -1086,7 +1100,7 @@ module tms34010 #(
                     mm_list <= {mm_list[14:0], 1'b0};
                     mm_i    <= mm_i + 5'd1;
                     if (mm_list[15]) begin
-                        cyc_add <= 8'd4; cyc_stb <= 1'b1;
+                        cyc_add <= 16'd4; cyc_stb <= 1'b1;
                         if (kind == K_MMTM) begin
                             `SET_REG(fR, rd, r_d - 32'd32)
                             fe_addr <= r_d - 32'd32; fe_size <= 6'd32; fe_wr <= 1'b1;
@@ -1224,7 +1238,15 @@ module tms34010 #(
                 g_y <= g_dy[15:0];
                 if (g_fw0 < 0) begin g_lp <= g_dx[4:0]; g_rp <= 5'd0; g_fw <= 16'd0; end
                 else begin g_lp <= g_lp0; g_rp <= g_rp0; g_fw <= 16'(g_fw0 >> (3'd4 - g_l2)); end
-                state <= (g_dx <= 0 || g_dy <= 0) ? S_DONE : G_ROW;
+                // MAME's count (34010gfx.hxx): 4, 2 more for an XY destination,
+                // 2 more once it is known not to be clipped away - and a
+                // FILL or PIXBLT that is clipped away returns before any of
+                // it is charged.  Then every row owes `g_rowcyc`.
+                if (g_dx <= 0 || g_dy <= 0) state <= S_DONE;
+                else begin
+                    cyc_add <= g_xy ? 16'd8 : 16'd6; cyc_stb <= 1'b1;
+                    state   <= G_ROW;
+                end
             end
             G_ROW: begin
                 g_dword <= g_daddr[31:4]; g_sword <= g_saddr[31:4]; g_sbit <= g_saddr[3:0];
@@ -1277,7 +1299,6 @@ module tms34010 #(
                     bus_req <= 1'b1; bus_we <= 1'b1; bus_addr <= g_dword; bus_wdata <= g_dstw;
                 end else if (bus_ack) begin
                     bus_req <= 1'b0; g_dword <= g_dword + 28'd1;
-                    cyc_add <= 8'd2; cyc_stb <= 1'b1;
                     if (g_seg == 2'd0)      g_seg <= 2'd1;
                     else if (g_seg == 2'd1) g_fwc <= g_fwc - 16'd1;
                     state <= (g_seg == 2'd2) ? G_ROWEND : G_SEG;
@@ -1286,6 +1307,7 @@ module tms34010 #(
             G_ROWEND: begin
                 g_saddr <= g_saddr + rb[1]; g_daddr <= g_daddr + rb[3]; g_dacc <= g_dacc + rb[3];
                 g_y <= g_y - 16'd1;
+                cyc_add <= g_rowcyc; cyc_stb <= 1'b1;
                 state <= (g_y == 16'd1) ? G_FIN : G_ROW;
             end
             G_FIN: begin
@@ -1348,7 +1370,7 @@ module tms34010 #(
             S_DONE: begin
                 push_st_too <= 1'b0;
                 ext_seen <= 1'b0;
-                if (bal <= 11'sd0) state <= S_FETCH;
+                if (bal <= 28'sd0) state <= S_FETCH;
             end
             default: state <= S_RESET;
         endcase
