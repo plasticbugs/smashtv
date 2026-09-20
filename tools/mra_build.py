@@ -69,9 +69,21 @@ def get_part(parts, node):
     if name is None:
         return literal_bytes(node)
     data = parts.get(name.lower())
-    if data is None:
-        sys.exit(f'error: {name} is missing from the romset')
     crc = node.get('crc')
+    if data is None and crc:
+        # MAME renames ROM files now and then (this set went from u89-la8 to
+        # la8_smash_tv_game_rom_u89.u89 at 0.240) and the contents are what
+        # matter, so a part that is not there under the MRA's name is looked
+        # for under any name by its CRC.
+        want = int(crc, 16)
+        for other, blob in parts.items():
+            if zlib.crc32(blob) & 0xffffffff == want:
+                print(f'  {name}: found as {other} (same CRC {crc})')
+                data = blob
+                break
+    if data is None:
+        sys.exit(f'error: {name} is missing from the romset'
+                 + (f' under that name, and no file in it has CRC {crc}' if crc else ''))
     if crc:
         actual = zlib.crc32(data) & 0xffffffff
         if actual != int(crc, 16):
