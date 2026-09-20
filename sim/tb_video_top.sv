@@ -153,7 +153,7 @@ module tb_video_top #(
         .bl_req(bl_req), .bl_row(bl_row), .bl_col(bl_col),
         .bl_pix(bl_pix), .bl_pal(bl_pal), .bl_gnt(bl_gnt),
         .cpu_req(cpu_req), .cpu_we(cpu_we), .cpu_word(cpu_word),
-        .cpu_d(cpu_d), .cpu_be(cpu_be), .cpu_bank(ctrl[5]),
+        .cpu_d(cpu_d), .cpu_be(cpu_be), .cpu_srt(1'b0), .cpu_bank(ctrl[5]),
         .cpu_dpal(blit_q_pal), .cpu_ack(cpu_ack), .cpu_q(cpu_q),
         .rf_start(rf_start), .rf_row(rf_row), .rf_valid(rf_valid),
         .rf_col(rf_col), .rf_pix(rf_pix), .rf_pal(rf_pal), .rf_busy(rf_busy),
@@ -187,7 +187,7 @@ module tb_video_top #(
 
     stv_video u_video (
         .clk(clk), .rst(rst), .cen_dot(cen_dot),
-        .vreg_we(vreg_we), .vreg_a(vreg_a), .vreg_d(vreg_d),
+        .vreg_we(vreg_we), .vreg_a(vreg_a), .vreg_d(vreg_d), .vreg_q(),
         .hcount_q(hcount_q), .vcount_q(vcount_q),
         .pal_we(pal_we), .pal_a(pal_a), .pal_d(pal_d), .pal_be(pal_be),
         .autoerase(~ctrl[4]),

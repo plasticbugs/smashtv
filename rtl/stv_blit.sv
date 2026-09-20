@@ -90,6 +90,7 @@ module stv_blit (
     logic          [7:0] pal, col;
     logic          [3:0] op;
     logic                flipx;
+    logic                pend;           // a pixel is waiting for its grant
     logic         [15:0] cmd;
 
     // The source word the pixel loop is using, and the next one, prefetched.
@@ -147,6 +148,7 @@ module stv_blit (
     always_ff @(posedge clk) begin
         if (rst) begin
             bst      <= B_IDLE;
+            pend     <= 1'b0;
             irq      <= 1'b0;
             px_drawn <= '0;
             gfx_stall<= '0;
@@ -266,7 +268,14 @@ module stv_blit (
                 B_FETCH: if (hit || phit) bst <= B_PIX;
                          else              gfx_stall <= gfx_stall + 32'd1;
 
-                B_PIX: if (cen) begin
+                // The request is held until it is granted.  It used to be up
+                // only for the clock `cen` was, which is enough for the block-RAM
+                // rows, where the grant is combinational -- and never enough
+                // for rows 256-509, which answer a clock later.  The only blit
+                // that goes there is the one the game's own self-test makes,
+                // to row 257, and the game said so: CUSTOM CHIP U99 BAD.
+                B_PIX: if (cen || pend) begin
+                    pend <= pwe && !fb_gnt;
                     if (!pwe || fb_gnt) begin
                         px_drawn <= px_drawn + 32'd1;
                         o  <= o + 23'd1;
@@ -358,7 +367,7 @@ module stv_blit (
     end
     assign gfx_req = greq;
 
-    assign fb_req = (bst == B_PIX) && cen && pwe;
+    assign fb_req = (bst == B_PIX) && (cen || pend) && pwe;
     assign fb_row = ty;
     assign fb_col = tx;
     assign fb_pix = pval;

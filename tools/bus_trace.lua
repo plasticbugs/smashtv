@@ -32,6 +32,11 @@ local cpu = mac.devices[":maincpu"]
 local sp  = cpu.spaces["program"]
 local dir = os.getenv("TRACE_DIR") or "."
 local WANT = tonumber(os.getenv("TRACE_N") or "2000000")
+-- START_FRAME > 0 begins the trace at that frame's notifier instead of at
+-- reset, and writes the TMS34010's I/O registers as they stand at that
+-- instant to ioregs.txt, so the bench can warm-start the RTL there.
+local START = tonumber(os.getenv("START_FRAME") or "0")
+local recording = (START == 0)
 
 local n = 0
 local buf = {}
@@ -56,7 +61,7 @@ local function region_of(a)
 end
 
 local function rec(write, a, data, mask)
-    if n >= WANT then return end
+    if not recording or n >= WANT then return end
     local r = region_of(a)
     if write then per_region_w[r] = (per_region_w[r] or 0) + 1
     else         per_region_r[r] = (per_region_r[r] or 0) + 1 end
@@ -86,7 +91,33 @@ local NAMES = {
     "sound", "control", "gfxrom", "progrom", "ioregs", "other"
 }
 
+local frames = 0
+local function press(port, field, on)
+    local p = mac.ioport.ports[port]
+    if p and p.fields[field] then p.fields[field]:set_value(on and 0 or 1) end
+end
 _G.KEEP = { t = taps }
+_G.KEEP.n = emu.add_machine_frame_notifier(function()
+    frames = frames + 1
+    -- the same script of inputs every capture in this tree uses
+    if frames == 1600 then press(":IN1", "Coin 1", true) end
+    if frames == 1610 then press(":IN1", "Coin 1", false) end
+    if frames == 1700 then press(":IN1", "1 Player Start", true) end
+    if frames == 1710 then press(":IN1", "1 Player Start", false) end
+    if frames > 1800 then
+        press(":IN0", "P1 Fire Right", (frames // 30) % 2 == 0)
+        press(":IN0", "P1 Move Up",    (frames // 47) % 2 == 0)
+    end
+    if START > 0 and frames == START then
+        local o = io.open(dir .. "/ioregs.txt", "w")
+        for r = 0, 31 do
+            -- not HCOUNT (28): reading it is harmless but meaningless here
+            o:write(string.format("%04x\n", sp:read_u16(0xc0000000 + r * 16)))
+        end
+        o:close()
+        recording = true
+    end
+end)
 _G.KEEP.s = emu.add_machine_stop_notifier(function()
     if #buf > 0 then f:write(table.concat(buf)) end
     f:close()

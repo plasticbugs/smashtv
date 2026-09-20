@@ -26,7 +26,12 @@
 //------------------------------------------------------------------------------
 `default_nettype none
 
-module stv_video (
+module stv_video #(
+    // 1: the registers reset to the values Smash T.V. programs, so the raster
+    //    runs with no CPU (the video bench).  0: they reset to zero as the
+    //    chip's do, and the picture is off until the game turns it on.
+    parameter bit RESET_TO_GAME = 1'b1
+) (
     input  logic        clk,
     input  logic        rst,
     input  logic        cen_dot,        // 8 MHz
@@ -35,6 +40,7 @@ module stv_video (
     input  logic        vreg_we,
     input  logic  [4:0] vreg_a,
     input  logic [15:0] vreg_d,
+    output logic [15:0] vreg_q,         // read-back of register vreg_a
     output logic [15:0] hcount_q,
     output logic [15:0] vcount_q,
 
@@ -82,12 +88,12 @@ module stv_video (
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            hesync <= 16'h0015; heblnk <= 16'h002d;
-            hsblnk <= 16'h00fa; htotal <= 16'h00fc;
-            vesync <= 16'h0003; veblnk <= 16'h0014;
-            vsblnk <= 16'h0114; vtotal <= 16'h0120;
-            dpyctl <= 16'hf010; dpystrt <= 16'hfffc;
-            dpyintr<= 16'h009a; dpytap  <= 16'h0000;
+            hesync <= RESET_TO_GAME ? 16'h0015 : 16'h0; heblnk <= RESET_TO_GAME ? 16'h002d : 16'h0;
+            hsblnk <= RESET_TO_GAME ? 16'h00fa : 16'h0; htotal <= RESET_TO_GAME ? 16'h00fc : 16'h0;
+            vesync <= RESET_TO_GAME ? 16'h0003 : 16'h0; veblnk <= RESET_TO_GAME ? 16'h0014 : 16'h0;
+            vsblnk <= RESET_TO_GAME ? 16'h0114 : 16'h0; vtotal <= RESET_TO_GAME ? 16'h0120 : 16'h0;
+            dpyctl <= RESET_TO_GAME ? 16'hf010 : 16'h0; dpystrt <= RESET_TO_GAME ? 16'hfffc : 16'h0;
+            dpyintr<= RESET_TO_GAME ? 16'h009a : 16'h0; dpytap  <= 16'h0000;
         end else if (vreg_we) begin
             unique case (vreg_a)
                 5'(RI_HESYNC):  hesync  <= vreg_d;
@@ -105,6 +111,29 @@ module stv_video (
                 default: ;
             endcase
         end
+    end
+
+    // Read-back, for the registers that live here.  HCOUNT, VCOUNT and DPYADR
+    // are the moving ones, and the game polls VCOUNT.
+    always_comb begin
+        unique case (vreg_a)
+            5'(RI_HESYNC):  vreg_q = hesync;
+            5'(RI_HEBLNK):  vreg_q = heblnk;
+            5'(RI_HSBLNK):  vreg_q = hsblnk;
+            5'(RI_HTOTAL):  vreg_q = htotal;
+            5'(RI_VESYNC):  vreg_q = vesync;
+            5'(RI_VEBLNK):  vreg_q = veblnk;
+            5'(RI_VSBLNK):  vreg_q = vsblnk;
+            5'(RI_VTOTAL):  vreg_q = vtotal;
+            5'(RI_DPYCTL):  vreg_q = dpyctl;
+            5'(RI_DPYSTRT): vreg_q = dpystrt;
+            5'(RI_DPYINT):  vreg_q = dpyintr;
+            5'(RI_DPYTAP):  vreg_q = dpytap;
+            5'd28:          vreg_q = hcount_q;
+            5'd29:          vreg_q = vcount_q;
+            5'd30:          vreg_q = dpyadr;
+            default:        vreg_q = 16'd0;
+        endcase
     end
 
     // ------------------------------------------------------------- raster

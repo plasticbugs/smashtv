@@ -78,34 +78,38 @@ int main(int argc, char **argv) {
         return uint16_t((rom[2 * w] << 8) | rom[2 * w + 1]);
     };
 
-    // ---- the bus trace
-    std::vector<Tx> tx;
-    { FILE *f = fopen((pos[0] + "/trace_bus.bin").c_str(), "rb");
-      if (!f) { fprintf(stderr, "no trace_bus.bin\n"); return 2; }
-      Tx t; while (fread(&t, sizeof(t), 1, f) == 1) tx.push_back(t);
-      fclose(f); }
+    // ---- both traces are read as they are needed, never whole: they may be
+    // files, or named pipes with MAME still running on the other end
+    // (sim/run_cpu.sh -live), which is what lets this run for thousands of
+    // frames without hundreds of gigabytes of trace.
+    FILE *fbus = fopen((pos[0] + "/trace_bus.bin").c_str(), "rb");
+    FILE *freg = fopen((pos[0] + "/trace_reg.txt").c_str(), "r");
+    if (!fbus || !freg) { fprintf(stderr, "no traces in %s\n", pos[0].c_str()); return 2; }
+    setvbuf(fbus, nullptr, _IOFBF, 1 << 20);
+    setvbuf(freg, nullptr, _IOFBF, 1 << 20);
 
-    // ---- the register trace
-    std::vector<Insn> ins;
-    { FILE *f = fopen((pos[0] + "/trace_reg.txt").c_str(), "r");
-      if (!f) { fprintf(stderr, "no trace_reg.txt\n"); return 2; }
-      char line[1024]; Insn cur; bool have = false;
-      while (fgets(line, sizeof(line), f)) {
-          if (line[0] == '=') {
-              char *p = line + 1;
-              for (int i = 0; i < 32; i++) cur.r[i] = uint32_t(strtoul(p, &p, 16));
-              have = true;
-          } else if (have && strlen(line) > 9 && line[8] == ':') {
-              cur.pc = uint32_t(strtoul(line, nullptr, 16));
-              strncpy(cur.text, line + 10, sizeof(cur.text) - 1);
-              cur.text[sizeof(cur.text) - 1] = 0;
-              char *nl = strchr(cur.text, '\n'); if (nl) *nl = 0;
-              ins.push_back(cur); have = false;
-              if (limit && long(ins.size()) > limit + 8) break;
-          }
-      }
-      fclose(f); }
-    printf("%zu transactions, %zu instructions from MAME\n", tx.size(), ins.size());
+    auto next_tx = [&](Tx &t) { return fread(&t, sizeof(t), 1, fbus) == 1; };
+    auto next_insn = [&](Insn &out) {
+        char line[1024]; bool have = false;
+        while (fgets(line, sizeof(line), freg)) {
+            if (line[0] == '=') {
+                char *p = line + 1;
+                for (int i = 0; i < 32; i++) out.r[i] = uint32_t(strtoul(p, &p, 16));
+                have = true;
+            } else if (have && strlen(line) > 9 && line[8] == ':') {
+                out.pc = uint32_t(strtoul(line, nullptr, 16));
+                strncpy(out.text, line + 10, sizeof(out.text) - 1);
+                out.text[sizeof(out.text) - 1] = 0;
+                char *nl = strchr(out.text, '\n'); if (nl) *nl = 0;
+                return true;
+            }
+        }
+        return false;
+    };
+    // one instruction of look-ahead, to see an interrupt coming
+    Insn cur_i, nxt_i;
+    bool have_cur = next_insn(cur_i), have_nxt = have_cur && next_insn(nxt_i);
+    Tx cur_t; bool have_t = next_tx(cur_t);
 
     // ---- interrupt entry points: the handler addresses, from the vectors
     auto rom_long = [&](uint32_t a) { return uint32_t(rom_word(a)) | (uint32_t(rom_word(a + 16)) << 16); };
@@ -118,8 +122,37 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 8; i++) tick();
     dut->rst = 0;
 
+    // ---- a warm start: the traces begin at some frame, not at reset, so the
+    // RTL is given MAME's registers as of the first traced instruction and
+    // the I/O registers tools/bus_trace.lua wrote down at the same instant
+    bool warm = false;
+    { FILE *f = fopen((pos[0] + "/ioregs.txt").c_str(), "r");
+      if (f && have_cur) {
+          unsigned io[32] = {0}; for (int i = 0; i < 32; i++) if (fscanf(f, "%x", &io[i]) != 1) break;
+          fclose(f);
+          auto *r = dut->rootp;
+          r->tb_cpu_top__DOT__u_cpu__DOT__st = cur_i.r[0];
+          for (int i = 0; i < 15; i++) {
+              r->tb_cpu_top__DOT__u_cpu__DOT__ra[i] = cur_i.r[1 + i];
+              r->tb_cpu_top__DOT__u_cpu__DOT__rb[i] = cur_i.r[16 + i];
+          }
+          r->tb_cpu_top__DOT__u_cpu__DOT__sp = cur_i.r[31];
+          r->tb_cpu_top__DOT__u_cpu__DOT__pc = cur_i.pc;
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_control = io[0x0b];
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_intenb  = io[0x11];
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_intpend = io[0x12] & 0x0c00;
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_convsp  = io[0x13];
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_convdp  = io[0x14];
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_psize   = io[0x15];
+          r->tb_cpu_top__DOT__u_cpu__DOT__io_pmask   = io[0x16];
+          r->tb_cpu_top__DOT__u_cpu__DOT__state = 3;          // S_FETCH
+          warm = true;
+          printf("warm start at %08x\n", cur_i.pc);
+      } else if (f) fclose(f); }
+
     size_t ti = 0, ii = 0;
-    long irqs = 0;
+    long irqs = 0, reexec = 0, srts = 0;
+    uint32_t gfx_pc = 0;
     std::deque<std::string> recent;
     bool pending_ack = false;
     int  fail = 0;
@@ -139,8 +172,8 @@ int main(int argc, char **argv) {
 
         // ---- an instruction is starting: the registers must be MAME's
         if (dut->insn_start) {
-            if (ii >= ins.size() || (limit && long(ii) >= limit)) break;
-            const Insn &m = ins[ii];
+            if (!have_cur || (limit && long(ii) >= limit)) break;
+            const Insn m = cur_i;
             bool bad = (dut->dbg_pc != m.pc);
             for (int i = 0; i < 32 && !bad; i++) if (rtl_reg(i) != m.r[i]) bad = true;
             if (bad) {
@@ -155,11 +188,11 @@ int main(int argc, char **argv) {
             recent.push_back(b); if (recent.size() > 12) recent.pop_front();
 
             // is MAME about to enter an interrupt after this instruction?
-            if (ii + 1 < ins.size()) {
-                uint32_t np = ins[ii + 1].pc;
+            if (have_nxt) {
+                uint32_t np = nxt_i.pc;
                 bool is_h = (np == h_di || np == h_x1 || np == h_x2);
                 // a handler entered by an interrupt: ST was reset to 0x10
-                if (is_h && ins[ii + 1].r[0] == 0x00000010 && strncmp(m.text, "TRAP", 4) != 0) {
+                if (is_h && nxt_i.r[0] == 0x00000010 && strncmp(m.text, "TRAP", 4) != 0) {
                     if (np == h_di) dut->dpyint = 1;
                     else if (np == h_x1) dut->int1 = 1;
                     else dut->int2 = 1;
@@ -167,6 +200,21 @@ int main(int argc, char **argv) {
                 }
             }
             ii++;
+            // MAME runs a PIXBLT, FILL or LINE to completion the first time
+            // and then executes the same instruction again, as many times as
+            // its timeslice needs, only to burn the cycles.  Those entries --
+            // same PC, straight after -- are the emulator's bookkeeping.
+            bool gfx = !strncmp(m.text, "PIXBLT", 6) || !strncmp(m.text, "FILL", 4)
+                    || !strncmp(m.text, "LINE", 4);
+            if (gfx) gfx_pc = m.pc;
+            cur_i = nxt_i; have_cur = have_nxt;
+            if (have_nxt) have_nxt = next_insn(nxt_i);
+            while (gfx && have_cur && cur_i.pc == m.pc) {
+                reexec++;
+                cur_i = nxt_i; have_cur = have_nxt;
+                if (have_nxt) have_nxt = next_insn(nxt_i);
+            }
+            if ((ii % 5000000) == 0) { printf("  ... %zu instructions\n", ii); fflush(stdout); }
         } else {
             dut->dpyint = 0;
         }
@@ -176,11 +224,28 @@ int main(int argc, char **argv) {
         if (pending_ack) { dut->bus_ack = 0; pending_ack = false; continue; }
         if (dut->bus_req && !dut->bus_ack) {
             uint32_t a = dut->bus_addr;
-            if (ii == 0) {                       // the reset vector, before the trace begins
+            if (dut->bus_srt) {
+                // A shift-register transfer.  MAME does it with a callback
+                // and no bus access, so there is nothing in the bus trace to
+                // check or to answer from; what it left in the destination
+                // register is in the next instruction's state, which by now
+                // is cur_i.  The destination is the last operand.
+                const char *c = strrchr(recent.back().c_str(), ',');
+                int reg = -1;
+                if (c && c[1] == 'A') reg = 1 + atoi(c + 2);
+                else if (c && c[1] == 'B') reg = 16 + atoi(c + 2);
+                else if (c && c[1] == 'S') reg = 31;
+                dut->bus_rdata = (reg >= 0) ? uint16_t(cur_i.r[reg]) : 0;
+                srts++;
+            } else if (ii == 0 && !warm) {       // the reset vector, before the trace begins
                 dut->bus_rdata = rom_word(a);
             } else {
-                if (ti >= tx.size()) break;
-                const Tx &t = tx[ti];
+                // ...and each of those re-executions fetched the opcode again
+                while (have_t && gfx_pc && !cur_t.write && cur_t.addr == gfx_pc
+                       && !(a == gfx_pc && !dut->bus_we))
+                    have_t = next_tx(cur_t);
+                if (!have_t) break;
+                const Tx t = cur_t;
                 bool ok = (t.addr == a) && (bool(t.write) == bool(dut->bus_we))
                        && (!dut->bus_we || t.data == dut->bus_wdata);
                 if (!ok) {
@@ -192,13 +257,15 @@ int main(int argc, char **argv) {
                 }
                 dut->bus_rdata = t.data;
                 ti++;
+                have_t = next_tx(cur_t);
             }
             dut->bus_ack = 1; pending_ack = true;
         }
     }
 
-    printf("%zu instructions and %zu transactions matched MAME; %ld interrupts replayed\n",
-           ii, ti, irqs);
+    printf("%zu instructions and %zu transactions matched MAME; %ld interrupts replayed, "
+           "%ld graphics re-executions stepped over, %ld shift-register transfers\n",
+           ii, ti, irqs, reexec, srts);
     delete dut;
     if (fail == 1) return 1;
     if (fail == 2) return 3;

@@ -55,6 +55,7 @@ module stv_vram (
     input  logic [16:0] cpu_word,
     input  logic [15:0] cpu_d,
     input  logic  [1:0] cpu_be,
+    input  logic        cpu_srt,        // a shift-register transfer: read the entry
     input  logic        cpu_bank,       // control register bit 5
     input  logic [15:0] cpu_dpal,       // the blitter's palette register
     output logic        cpu_ack,
@@ -212,7 +213,7 @@ module stv_vram (
     logic [16:0] cpu_word_l;
     logic [15:0] cpu_d_l, cpu_dpal_l;
     logic  [1:0] cpu_be_l;
-    logic        cpu_bank_l, cpu_we_l;
+    logic        cpu_bank_l, cpu_we_l, cpu_srt_l;
     logic  [7:0] cpu_qa, cpu_qb;
     logic        cpu_tpl_l;
 
@@ -248,6 +249,7 @@ module stv_vram (
             C_IDLE: if (cpu_req && !cpu_ack && !cpu_door) begin
                 cpu_word_l <= cpu_word; cpu_d_l <= cpu_d; cpu_be_l <= cpu_be;
                 cpu_bank_l <= cpu_bank; cpu_we_l <= cpu_we; cpu_dpal_l <= cpu_dpal;
+                cpu_srt_l  <= cpu_srt && !cpu_we;
                 phase      <= 1'b0;
                 cpu_tpl_l  <= is_tpl(cpu_word[16:8]);
                 cst        <= C_ISSUE;
@@ -267,12 +269,21 @@ module stv_vram (
                                                 : (cpu_bank_l ? r_pix : r_pal);
                 else        cpu_qb <= cpu_tpl_l ? (cpu_bank_l ? t_pix : t_pal)
                                                 : (cpu_bank_l ? r_pix : r_pal);
-                cst <= C_NEXT;
+                // A shift-register transfer answers with the first pixel's
+                // whole entry, { palette, pixel }, which is what MAME's
+                // to_shiftreg leaves in shiftreg[0]; one access, not two.
+                if (cpu_srt_l) begin
+                    cpu_qa <= cpu_tpl_l ? t_pix : r_pix;
+                    cpu_qb <= cpu_tpl_l ? t_pal : r_pal;
+                    cst    <= C_DONE;
+                end else cst <= C_NEXT;
             end
             C_XWAIT: if (xm_ack) begin
                 if (!phase) cpu_qa <= cpu_bank_l ? xm_q[7:0] : xm_q[15:8];
                 else        cpu_qb <= cpu_bank_l ? xm_q[7:0] : xm_q[15:8];
-                cst <= C_NEXT;
+                if (cpu_srt_l) begin
+                    cpu_qa <= xm_q[7:0]; cpu_qb <= xm_q[15:8]; cst <= C_DONE;
+                end else cst <= C_NEXT;
             end
             C_NEXT: begin
                 if (!phase) begin phase <= 1'b1; cst <= C_ISSUE; end

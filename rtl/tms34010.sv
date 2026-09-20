@@ -25,11 +25,13 @@
 //   * interrupts are looked for between instructions (MAME looks less often,
 //     at timeslice boundaries, which is an emulator's economy, not the chip).
 //
-// What is not here yet, and raises `unimpl` rather than doing something
-// plausible: LINE, PIXBLT, FILL, raster ops, window checking, plane masking,
-// the host interface.  docs/hardware.md section 9 has the measurement of
-// which of those this game ever executes (PIXBLT B,XY and FILL XY, a handful
-// of times, in the power-up self-test only).
+// What is not here, and raises `unimpl` rather than doing something plausible:
+// LINE, the four pixel-array PIXBLTs, raster ops, window checking, plane
+// masking, 32-bit pixels in PIXBLT B and FILL, the host interface.
+// docs/hardware.md section 9 has the measurement that this game executes none
+// of them.  PIXBLT B and FILL run to completion in one go; MAME's P flag and
+// its re-execution of the instruction to burn cycles are an emulator's
+// bookkeeping, and the bench steps over them.
 //------------------------------------------------------------------------------
 `default_nettype none
 
@@ -50,6 +52,10 @@ module tms34010 #(
     output logic [15:0] bus_wdata,
     input  logic [15:0] bus_rdata,
     input  logic        bus_ack,
+    // This read is a VRAM shift-register transfer, not a data read: DPYCTL's
+    // SRT bit is set and the instruction is a pixel read.  The game does one
+    // a frame, from inside its display interrupt (docs/hardware.md 7.7).
+    output logic        bus_srt,
 
     // ---------------- interrupts
     input  logic        int1,           // level
@@ -63,22 +69,28 @@ module tms34010 #(
     output logic        unimpl          // sticky: met something not built
 );
     // ------------------------------------------------------------ state
-    logic [31:0] ra [15] /* verilator public_flat_rd */;   // A0..A14
-    logic [31:0] rb [15] /* verilator public_flat_rd */;   // B0..B14
-    logic [31:0] sp      /* verilator public_flat_rd */;
-    logic [31:0] pc      /* verilator public_flat_rd */;
-    logic [31:0] st      /* verilator public_flat_rd */;
+    logic [31:0] ra [15] /* verilator public_flat_rw @(posedge clk) */;   // A0..A14
+    logic [31:0] rb [15] /* verilator public_flat_rw @(posedge clk) */;   // B0..B14
+    logic [31:0] sp      /* verilator public_flat_rw @(posedge clk) */;
+    logic [31:0] pc      /* verilator public_flat_rw @(posedge clk) */;
+    logic [31:0] st      /* verilator public_flat_rw @(posedge clk) */;
     assign dbg_pc = pc;
 
     localparam int ST_N = 31, ST_C = 30, ST_Z = 29, ST_V = 28, ST_IE = 21;
 
     // I/O registers the CPU itself needs; the rest live outside and are
     // reached over the bus like any other memory.
-    logic [15:0] io_control, io_convsp, io_convdp, io_psize, io_pmask;
-    logic [15:0] io_intenb, io_intpend;
+    logic [15:0] io_control /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_convsp  /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_convdp  /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_psize   /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_pmask   /* verilator public_flat_rw @(posedge clk) */;
+    logic [15:0] io_intenb  /* verilator public_flat_rw @(posedge clk) */;
+    logic        io_srt     /* verilator public_flat_rw @(posedge clk) */;   // DPYCTL bit 11
+    logic [15:0] io_intpend /* verilator public_flat_rw @(posedge clk) */;
     localparam logic [4:0] IO_CONTROL = 5'h0b, IO_INTENB = 5'h11, IO_INTPEND = 5'h12,
                            IO_CONVSP = 5'h13, IO_CONVDP = 5'h14, IO_PSIZE = 5'h15,
-                           IO_PMASK = 5'h16;
+                           IO_PMASK = 5'h16, IO_DPYCTL = 5'h08;
 
     // ------------------------------------------------------------ helpers
     function automatic logic [31:0] rget(input logic file, input logic [3:0] i);
@@ -126,7 +138,7 @@ module tms34010 #(
         K_MOVE,
         K_JCC,
         K_ADDXY, K_SUBXY, K_CMPXY, K_CPW, K_CVXYL, K_MOVX, K_MOVY,
-        K_PIXT, K_DRAV
+        K_PIXT, K_DRAV, K_GFX
     } kind_t;
 
     // addressing modes of a MOVE or MOVB operand
@@ -206,12 +218,15 @@ module tms34010 #(
             16'b0000_1101_0011_????: begin kind = K_CALLR; cyc = 6'd3; end
             16'b0000_1101_0101_????: begin kind = K_CALLA; cyc = 6'd4; end
             16'b0000_1101_0110_????: begin kind = K_EINT;  cyc = 6'd3; end
-            16'b0000_1101_100?_????: begin kind = K_DSJ;   cyc = 6'd3; end
-            16'b0000_1101_101?_????: begin kind = K_DSJEQ; cyc = 6'd3; end
-            16'b0000_1101_110?_????: begin kind = K_DSJNE; cyc = 6'd3; end
+            16'b0000_1101_100?_????: begin kind = K_DSJ;   cyc = 6'd2; end
+            16'b0000_1101_101?_????: begin kind = K_DSJEQ; cyc = 6'd2; end
+            16'b0000_1101_110?_????: begin kind = K_DSJNE; cyc = 6'd2; end
             16'b0000_1101_1110_????: begin kind = K_SETC; end
             16'b0000_1110_????_????: begin kind = K_ILLOP; cyc = 6'd16; end
-            // 0x0f00: PIXBLT and FILL -- not built yet, K_UNIMPL
+            // 0x0f80 PIXBLT B,L  0x0fa0 PIXBLT B,XY  0x0fc0 FILL L  0x0fe0 FILL XY
+            // (the pixel-array-to-pixel-array PIXBLTs at 0x0f00-0x0f6f are
+            // not built: measured, this game never executes one)
+            16'b0000_1111_1??0_????: begin kind = K_GFX; cyc = 6'd6; end
 
             // ---- 0x1000 .. 0x3fff: a 5-bit constant and a register
             16'b0001_00??_????_????: begin kind = K_ADDK; end
@@ -390,17 +405,32 @@ module tms34010 #(
         S_MM_NEXT, S_MM_DONE,
         S_JREAD, S_JREAD2, S_CALL2,
         S_MUL, S_MUL2, S_DIV, S_DIV2,
-        S_PIX_RD, S_PIX_WR, S_PIX_END,
+        S_PIX_RD, S_PIX_SRT, S_PIX_WR, S_PIX_END,
+        G_INIT, G_ROW, G_ROWSRC, G_SEG, G_RDDST, G_PIX, G_SRCRD, G_WRDST, G_ROWEND, G_FIN,
         S_DONE
     } st_t;
-    st_t   state, fe_ret;
+    // S_FETCH is 3, and sim/tb_cpu.cpp's warm start relies on it
+    st_t   state /* verilator public_flat_rw @(posedge clk) */;
+    st_t   fe_ret;
 
     logic [15:0] ext [4];
     logic  [2:0] ext_i;
+    logic        ext_seen;              // this instruction's cycles are charged
     logic [31:0] t_a, t_data;           // scratch between states
     logic  [4:0] mm_i;                  // MMTM/MMFM register counter
     logic [15:0] mm_list;
-    logic  [7:0] cyc_left;
+    // Pacing.  Every instruction owes MAME's cycle count; every `cen` pays one
+    // cycle off; the next instruction starts when nothing is owed.  The
+    // balance may run CREDIT cycles into credit, so an instruction that took
+    // longer than its count -- MAME charges MOVE Rs,*Rd+ one cycle, 19 clocks,
+    // and two word writes through a real bus take longer than that -- is
+    // repaid by the register-only instructions around it, which finish in
+    // half theirs.  Without the credit the power-up tests ran 6% behind
+    // MAME: the machine's frame 640 was MAME's frame 600.
+    localparam logic signed [10:0] CREDIT = -11'sd64;
+    logic signed [10:0] bal;
+    logic         [7:0] cyc_add;        // cycles this clock adds to the debt
+    logic               cyc_stb;
     logic [31:0] vec_addr;
     logic        push_st_too;           // a trap or interrupt: push ST after PC
     logic [31:0] ret_pc;
@@ -632,7 +662,41 @@ module tms34010 #(
 
     // the pixel a PIXT or DRAV is about to write
     wire        pix_from_reg = (kind == K_DRAV) || (pixt_m == 3'd0) || (pixt_m == 3'd4);
-    wire [31:0] pix_val  = pix_from_reg ? (t_data & fmask(psize6)) : fe_rdata;
+    logic [15:0] srt_val;
+    wire [31:0] pix_val  = pix_from_reg ? (t_data & fmask(psize6))
+                         : io_srt       ? {16'd0, srt_val} : fe_rdata;
+
+    // ---- PIXBLT B and FILL (MAME's pixblt_b and fill in 34010gfx.hxx)
+    // A row is a left partial word, some full words and a right partial word
+    // of the destination; PIXBLT B also walks a 1-bit-per-pixel source,
+    // fetching its next word the moment the current one runs out -- before
+    // the destination word is written back, which is the order the bus trace
+    // has them in.
+    wire         g_fill = ir[6];
+    wire         g_xy   = ir[5];
+    wire   [2:0] g_l2   = io_psize[4] ? 3'd4 : io_psize[3] ? 3'd3 : io_psize[2] ? 3'd2
+                        : io_psize[1] ? 3'd1 : 3'd0;           // log2(bits per pixel)
+    wire   [4:0] g_bpp  = 5'd1 << g_l2;
+    wire   [4:0] g_ppw  = 5'd16 >> g_l2;                       // pixels per word
+    wire  [31:0] g_d0   = (g_xy ? xytol(rb[2], io_convdp) : rb[2]) & ~{27'd0, g_bpp - 5'd1};
+    wire signed [16:0] g_dx = {rb[7][15], rb[7][15:0]};
+    wire signed [16:0] g_dy = {rb[7][31], rb[7][31:16]};
+    wire   [4:0] g_lp0  = (g_ppw - {1'b0, (g_d0[3:0] >> g_l2)}) & (g_ppw - 5'd1);
+    wire  [31:0] g_end  = g_d0 + ({15'd0, g_dx} << g_l2);
+    wire   [4:0] g_rp0  = {1'b0, g_end[3:0] >> g_l2};
+    wire signed [17:0] g_fw0 = {g_dx[16], g_dx} - {13'd0, g_lp0} - {13'd0, g_rp0};
+
+    logic [31:0] g_saddr, g_daddr, g_dacc;
+    logic [27:0] g_sword, g_dword;
+    logic [15:0] g_srcw, g_dstw, g_y, g_fw, g_fwc;
+    logic  [4:0] g_lp, g_rp, g_cnt;
+    logic  [3:0] g_sbit, g_dpos;
+    logic  [1:0] g_seg;
+    // this pixel: the colour's bits at this position in the word
+    wire  [15:0] g_pmask = (16'hffff >> (5'd16 - g_bpp)) << g_dpos;
+    wire  [15:0] g_col   = (g_fill || g_srcw[g_sbit]) ? rb[9][15:0] : rb[8][15:0];
+    wire  [15:0] g_pixel = g_col & g_pmask;
+    wire         g_keep  = io_control[5] && (g_pixel == 16'd0);  // transparent
 
     // pending, enabled interrupts, in priority order
     wire [15:0] irq_act = io_intpend & io_intenb;
@@ -675,14 +739,16 @@ module tms34010 #(
         io_intpend[2] <= int2;
         if (dpyint) io_intpend[10] <= 1'b1;
 
-        if (cen && cyc_left != 8'd0) cyc_left <= cyc_left - 8'd1;
+        cyc_stb <= 1'b0;
+        bal <= bal + (cyc_stb ? $signed({3'd0, cyc_add}) : 11'sd0)
+                   - ((cen && bal > CREDIT) ? 11'sd1 : 11'sd0);
 
         if (rst) begin
             state <= S_RESET; st <= 32'h0000_0010; pc <= '0; sp <= '0;
             for (int i = 0; i < 15; i++) begin ra[i] <= '0; rb[i] <= '0; end
             io_control <= '0; io_convsp <= '0; io_convdp <= '0; io_psize <= '0;
-            io_pmask <= '0; io_intenb <= '0; io_intpend <= '0;
-            bus_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; cyc_left <= '0;
+            io_pmask <= '0; io_intenb <= '0; io_intpend <= '0; io_srt <= 1'b0; bus_srt <= 1'b0;
+            bus_req <= 1'b0; bus_we <= 1'b0; unimpl <= 1'b0; bal <= '0; cyc_stb <= 1'b0; ext_seen <= 1'b0;
             push_st_too <= 1'b0;
         end else case (state)
             // ------------------------------------------------ reset
@@ -713,7 +779,7 @@ module tms34010 #(
             end
             // extension words, then execute.  `next` is combinational on ir.
             S_EXT: begin
-                if (ext_i == 3'd0) cyc_left <= {2'd0, cyc};
+                if (ext_i == 3'd0 && !ext_seen) begin cyc_add <= {2'd0, cyc}; cyc_stb <= 1'b1; ext_seen <= 1'b1; end
                 if (ext_i == next) begin
                     state <= S_EXEC;
                 end else if (!bus_req) begin
@@ -732,7 +798,7 @@ module tms34010 #(
                 vec_addr    <= irq_vec;
                 push_st_too <= 1'b1;
                 ret_pc      <= pc;
-                cyc_left    <= 8'd16;
+                cyc_add     <= 8'd16; cyc_stb <= 1'b1;
                 // push PC
                 sp <= sp - 32'd32;
                 fe_addr <= sp - 32'd32; fe_size <= 6'd32; fe_wr <= 1'b1; fe_wdata <= pc;
@@ -849,26 +915,30 @@ module tms34010 #(
                         `SET_REG(fR, rd, r_d - 32'd1)
                         if (r_d != 32'd1)
                             pc <= ir[10] ? (pc - {23'd0, kf, 4'd0}) : (pc + {23'd0, kf, 4'd0});
-                        else cyc_left <= 8'd3;
+                        else begin cyc_add <= 8'd1; cyc_stb <= 1'b1; end   // 3, not 2
                     end
                     K_DSJ, K_DSJEQ, K_DSJNE: begin
                         if ((kind == K_DSJ) || (kind == K_DSJEQ && Z) || (kind == K_DSJNE && !Z)) begin
                             `SET_REG(fR, rd, r_d - 32'd1)
-                            if (r_d != 32'd1) state <= S_JREAD;
-                            else begin pc <= pc + 32'd16; cyc_left <= 8'd2; end
-                        end else begin pc <= pc + 32'd16; cyc_left <= 8'd2; end
+                            if (r_d != 32'd1) begin
+                                state <= S_JREAD; cyc_add <= 8'd1; cyc_stb <= 1'b1;
+                            end else pc <= pc + 32'd16;
+                        end else pc <= pc + 32'd16;
                     end
                     K_JCC: begin
+                        // MAME's counts: 8-bit 2 taken, 1 not; 16-bit 3 and 2;
+                        // absolute 3 and 4.  Decode charged 1 already.
+                        cyc_stb <= 1'b1;
                         if (ir[7:0] == 8'h00) begin           // 16-bit relative
-                            if (take) begin state <= S_JREAD; cyc_left <= 8'd3; end
-                            else      begin pc <= pc + 32'd16; cyc_left <= 8'd2; end
+                            if (take) begin state <= S_JREAD; cyc_add <= 8'd2; end
+                            else      begin pc <= pc + 32'd16; cyc_add <= 8'd1; end
                         end else if (ir[7:0] == 8'h80) begin  // absolute
-                            if (take) begin state <= S_JREAD; cyc_left <= 8'd3; end
-                            else      begin pc <= pc + 32'd32; cyc_left <= 8'd4; end
+                            if (take) begin state <= S_JREAD; cyc_add <= 8'd2; end
+                            else      begin pc <= pc + 32'd32; cyc_add <= 8'd3; end
                         end else begin                         // 8-bit relative
                             if (take) begin
-                                pc <= pc + {{20{ir[7]}}, ir[7:0], 4'd0}; cyc_left <= 8'd2;
-                            end else cyc_left <= 8'd1;
+                                pc <= pc + {{20{ir[7]}}, ir[7:0], 4'd0}; cyc_add <= 8'd1;
+                            end else cyc_add <= 8'd0;
                         end
                     end
 
@@ -904,6 +974,11 @@ module tms34010 #(
                     K_MOVE: state <= S_MV_SRCPRE;
 
                     // ---- pixels
+                    K_GFX: begin
+                        if (io_control[14:10] != 5'd0 || io_control[7:6] != 2'd0
+                            || io_pmask != 16'd0 || io_psize[5]) unimpl <= 1'b1;
+                        state <= G_INIT;
+                    end
                     K_PIXT, K_DRAV: begin
                         if (io_control[14:10] != 5'd0 || io_control[7:6] != 2'd0
                             || io_pmask != 16'd0) unimpl <= 1'b1;
@@ -1007,7 +1082,7 @@ module tms34010 #(
                     mm_list <= {mm_list[14:0], 1'b0};
                     mm_i    <= mm_i + 5'd1;
                     if (mm_list[15]) begin
-                        cyc_left <= cyc_left + 8'd4;
+                        cyc_add <= 8'd4; cyc_stb <= 1'b1;
                         if (kind == K_MMTM) begin
                             `SET_REG(fR, rd, r_d - 32'd32)
                             fe_addr <= r_d - 32'd32; fe_size <= 6'd32; fe_wr <= 1'b1;
@@ -1094,6 +1169,11 @@ module tms34010 #(
                 if (kind == K_DRAV || pixt_m == 3'd0 || pixt_m == 3'd4) begin
                     t_data <= (kind == K_DRAV) ? rb[9] : r_s;
                     state  <= S_PIX_WR;
+                end else if (io_srt) begin
+                    // a shift-register transfer: one read cycle, flagged, and
+                    // whatever comes back is the "pixel", all 16 bits of it
+                    t_a   <= (pixt_m == 3'd5 || pixt_m == 3'd6) ? r_s : xytol(r_s, io_convsp);
+                    state <= S_PIX_SRT;
                 end else begin
                     fe_addr <= ((pixt_m == 3'd5 || pixt_m == 3'd6) ? r_s
                                                                    : xytol(r_s, io_convsp))
@@ -1102,12 +1182,23 @@ module tms34010 #(
                     fe_ret <= S_PIX_WR; state <= S_FE;
                 end
             end
+            S_PIX_SRT: begin
+                if (!bus_req) begin
+                    bus_req <= 1'b1; bus_we <= 1'b0; bus_srt <= 1'b1; bus_addr <= t_a[31:4];
+                end else if (bus_ack) begin
+                    bus_req <= 1'b0; bus_srt <= 1'b0;
+                    srt_val <= bus_rdata;
+                    state   <= S_PIX_WR;
+                end
+            end
             S_PIX_WR: begin
                 if (kind != K_DRAV && (pixt_m == 3'd1 || pixt_m == 3'd5)) begin
                     // into a register: V says the pixel was not zero
                     `SET_REG(fR, rd, pix_val)
                     st[ST_V] <= (pix_val != 32'd0);
                     state <= S_DONE;
+                end else if (io_srt) begin
+                    unimpl <= 1'b1; state <= S_DONE; // register-to-VRAM transfer: never seen
                 end else if (io_control[5] && pix_val == 32'd0) begin
                     state <= S_PIX_END;              // transparent: nothing is written
                 end else begin
@@ -1120,6 +1211,83 @@ module tms34010 #(
             S_PIX_END: begin
                 if (kind == K_DRAV)
                     `SET_REG(fR, rd, {r_d[31:16] + r_s[31:16], r_d[15:0] + r_s[15:0]})
+                state <= S_DONE;
+            end
+
+            // ------------------------------------------------ PIXBLT B and FILL
+            G_INIT: begin
+                g_saddr <= rb[0]; g_daddr <= g_d0; g_dacc <= rb[2];
+                g_y <= g_dy[15:0];
+                if (g_fw0 < 0) begin g_lp <= g_dx[4:0]; g_rp <= 5'd0; g_fw <= 16'd0; end
+                else begin g_lp <= g_lp0; g_rp <= g_rp0; g_fw <= 16'(g_fw0 >> (3'd4 - g_l2)); end
+                state <= (g_dx <= 0 || g_dy <= 0) ? S_DONE : G_ROW;
+            end
+            G_ROW: begin
+                g_dword <= g_daddr[31:4]; g_sword <= g_saddr[31:4]; g_sbit <= g_saddr[3:0];
+                g_seg <= 2'd0; g_fwc <= g_fw;
+                state <= g_fill ? G_SEG : G_ROWSRC;
+            end
+            G_ROWSRC, G_SRCRD: begin
+                if (!bus_req) begin
+                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_sword;
+                end else if (bus_ack) begin
+                    bus_req <= 1'b0; g_srcw <= bus_rdata; g_sword <= g_sword + 28'd1;
+                    state <= (state == G_ROWSRC) ? G_SEG
+                           : (g_cnt == 5'd0)     ? G_WRDST : G_PIX;
+                end
+            end
+            G_SEG: begin
+                case (g_seg)
+                    2'd0: if (g_lp != 5'd0) begin
+                              g_cnt <= g_lp; g_dpos <= g_daddr[3:0]; state <= G_RDDST;
+                          end else g_seg <= 2'd1;
+                    2'd1: if (g_fwc != 16'd0) begin
+                              g_cnt <= g_ppw; g_dpos <= 4'd0; g_dstw <= 16'd0;
+                              // a full word is only read back when something of
+                              // it may survive, which is when transparency is on
+                              state <= io_control[5] ? G_RDDST : G_PIX;
+                          end else g_seg <= 2'd2;
+                    2'd2: if (g_rp != 5'd0) begin
+                              g_cnt <= g_rp; g_dpos <= 4'd0; state <= G_RDDST;
+                          end else state <= G_ROWEND;
+                    default: state <= G_ROWEND;
+                endcase
+            end
+            G_RDDST: begin
+                if (!bus_req) begin
+                    bus_req <= 1'b1; bus_we <= 1'b0; bus_addr <= g_dword;
+                end else if (bus_ack) begin
+                    bus_req <= 1'b0; g_dstw <= bus_rdata; state <= G_PIX;
+                end
+            end
+            G_PIX: begin
+                if (!g_keep) g_dstw <= (g_dstw & ~g_pmask) | g_pixel;
+                g_cnt  <= g_cnt - 5'd1;
+                g_dpos <= g_dpos + g_bpp[3:0];
+                g_sbit <= g_sbit + 4'd1;
+                if (!g_fill && g_sbit == 4'd15) state <= G_SRCRD;
+                else if (g_cnt == 5'd1)         state <= G_WRDST;
+            end
+            G_WRDST: begin
+                if (!bus_req) begin
+                    bus_req <= 1'b1; bus_we <= 1'b1; bus_addr <= g_dword; bus_wdata <= g_dstw;
+                end else if (bus_ack) begin
+                    bus_req <= 1'b0; g_dword <= g_dword + 28'd1;
+                    cyc_add <= 8'd2; cyc_stb <= 1'b1;
+                    if (g_seg == 2'd0)      g_seg <= 2'd1;
+                    else if (g_seg == 2'd1) g_fwc <= g_fwc - 16'd1;
+                    state <= (g_seg == 2'd2) ? G_ROWEND : G_SEG;
+                end
+            end
+            G_ROWEND: begin
+                g_saddr <= g_saddr + rb[1]; g_daddr <= g_daddr + rb[3]; g_dacc <= g_dacc + rb[3];
+                g_y <= g_y - 16'd1;
+                state <= (g_y == 16'd1) ? G_FIN : G_ROW;
+            end
+            G_FIN: begin
+                if (!g_fill) rb[0] <= g_saddr;
+                if (g_xy) rb[2][31:16] <= rb[2][31:16] + rb[7][31:16];
+                else      rb[2] <= g_dacc;
                 state <= S_DONE;
             end
 
@@ -1153,6 +1321,7 @@ module tms34010 #(
                                            :                          bus_rdata;
                     end else if (io_hit) begin
                         case (io_reg)
+                            IO_DPYCTL:  io_srt     <= bus_wdata[11];
                             IO_CONTROL: io_control <= bus_wdata;
                             IO_CONVSP:  io_convsp  <= bus_wdata;
                             IO_CONVDP:  io_convdp  <= bus_wdata;
@@ -1174,7 +1343,8 @@ module tms34010 #(
             // ------------------------------------------------ pace
             S_DONE: begin
                 push_st_too <= 1'b0;
-                if (cyc_left == 8'd0) state <= S_FETCH;
+                ext_seen <= 1'b0;
+                if (bal <= 11'sd0) state <= S_FETCH;
             end
             default: state <= S_RESET;
         endcase

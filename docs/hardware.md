@@ -584,6 +584,24 @@ PIXT `R,*R,XY` once. LINE, the other five PIXBLT forms, FILL L, CPW and the
 other PIXT forms never execute. Everything the player sees is drawn by the
 board's blitter, not by the graphics processor's graphics instructions.
 
+**A correction, and a lesson about sampling.** An earlier draft of this
+section said shift-register transfers were unused, because DPYCTL read 0xF010
+— bit 11 clear — at every one of four samples. It is set for three
+instructions a frame. Inside the display-interrupt handler at `0xFFE0E520`
+the game ORs 0x0800 into DPYCTL, executes `PIXT *A1,A2` with A1 = 0x00190000,
+and clears the bit again *(measured: 12 times in 12 frames of gameplay, found
+only because the CPU bench stopped on it)*. With SRT set a pixel read is a
+VRAM-to-shift-register transfer: MAME calls the driver's `to_shiftreg`, makes
+no bus access at all, and returns the first entry of that row as the "pixel".
+In MAME the transfer has no other effect, because the driver's autoerase
+copies rows 510/511 itself and never looks at the shift register; row 400,
+which 0x00190000 addresses, does not hold the erase pattern in any captured
+state. On the board it is presumably what arms the autoerase. The gateware
+follows MAME: the CPU flags the read (`bus_srt`), the frame buffer answers
+with the entry, nothing else happens. A register sampled four times is not a
+register that never changes; a tap on its writes would have shown this on
+day one.
+
 **Not used, and therefore not built** — each of these must be re-checked
 before it is left out for good:
 
@@ -592,8 +610,8 @@ before it is left out for good:
 - Raster ops (CONTROL bits 14-10 are 0, so pixel writes replace).
 - The host interface (HSTCTLL/HSTCTLH written twice with 0 at reset and never
   again; nothing on the board drives them).
-- Shift-register transfers (DPYCTL bit 11 is 0), although the Y-unit wires the
-  VRAM shift registers up and the autoerase is what uses them.
+- Shift-register transfers *to* memory (a pixel **write** with DPYCTL bit 11
+  set). The read direction **is** used — see the correction below.
 - Interlace (DPYCTL bit 14 is 1 = non-interlaced; MAME calls `fatalerror` if
   a Y-unit game ever clears it).
 - Input ports IN2, UNK0 and UNK1 — never read.
