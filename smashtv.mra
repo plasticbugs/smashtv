@@ -51,8 +51,8 @@
 
         <!-- 0x000000: TMS34010 program, 256 KB -->
         <interleave output="16">
-            <part name="la8_smash_tv_game_rom_u89.u89"   crc="8e7fe463" map="10"/>
-            <part name="la8_smash_tv_game_rom_u105.u105" crc="48cd793f" map="01"/>
+            <part name="la8_smash_tv_game_rom_u89.u89"   crc="8e7fe463" map="01"/>
+            <part name="la8_smash_tv_game_rom_u105.u105" crc="48cd793f" map="10"/>
         </interleave>
 
         <!-- 0x040000: MC6809E sound board, 192 KB, U4 then U19 then U20 -->
@@ -62,19 +62,19 @@
 
         <!-- 0x070000: graphics, 1.5 MB, three plane-pairs to a 32-bit word -->
         <interleave output="32">
-            <part name="la1_smash_tv_game_rom_u111.u111" crc="72f0ba84" map="1000"/>
-            <part name="la1_smash_tv_game_rom_u95.u95"   crc="e864a44b" map="0100"/>
-            <part name="la1_smash_tv_game_rom_u106.u106" crc="5c718361" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u111.u111" crc="72f0ba84" map="0001"/>
+            <part name="la1_smash_tv_game_rom_u95.u95"   crc="e864a44b" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u106.u106" crc="5c718361" map="0100"/>
         </interleave>
         <interleave output="32">
-            <part name="la1_smash_tv_game_rom_u112.u112" crc="436f0283" map="1000"/>
-            <part name="la1_smash_tv_game_rom_u96.u96"   crc="15555ea7" map="0100"/>
-            <part name="la1_smash_tv_game_rom_u107.u107" crc="0fba1e36" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u112.u112" crc="436f0283" map="0001"/>
+            <part name="la1_smash_tv_game_rom_u96.u96"   crc="15555ea7" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u107.u107" crc="0fba1e36" map="0100"/>
         </interleave>
         <interleave output="32">
-            <part name="la1_smash_tv_game_rom_u113.u113" crc="4a4b8110" map="1000"/>
-            <part name="la1_smash_tv_game_rom_u97.u97"   crc="ccac9d9e" map="0100"/>
-            <part name="la1_smash_tv_game_rom_u108.u108" crc="cb0a092f" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u113.u113" crc="4a4b8110" map="0001"/>
+            <part name="la1_smash_tv_game_rom_u97.u97"   crc="ccac9d9e" map="0010"/>
+            <part name="la1_smash_tv_game_rom_u108.u108" crc="cb0a092f" map="0100"/>
         </interleave>
     </rom>
 </misterromdescription>
