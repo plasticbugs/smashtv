@@ -1,9 +1,10 @@
 -- Instruction traces from MAME's debugger, in windows, so the set of
 -- TMS34010 instructions this game executes is measured rather than guessed.
 --
---   TRACE_DIR=... mame smashtv ... -debug -debugger none \
+--   TRACE_DIR=... tools/mame.sh -debug -debugger none \
 --       -autoboot_script tools/insn_trace.lua -seconds_to_run 48
---   (tools/insn_hist.sh wraps this.)
+--   (always through tools/mame.sh, which keeps MAME headless: run bare, MAME
+--   opens fullscreen and macOS jumps to a new Space)
 --
 -- One file per window, tr_<frame>.txt, each WINDOW frames long.  The first
 -- window starts at reset, which is where the self-tests live.
