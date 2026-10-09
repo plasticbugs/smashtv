@@ -125,6 +125,21 @@ Not proven:
   to open the game's test menu (`artifacts/machine/service_menu.png`); what is
   in that menu has not been run.
 
+## Analogizer
+
+The core supports RndMnkIII's [Analogizer](https://github.com/RndMnkIII/Analogizer)
+adapter: the board's native 15.8 kHz, 54.7 Hz picture out of the VGA port
+(RGBS, RGsB, YPbPr, Y/C, or scandoubled for a VGA monitor), and SNAC
+controllers for both players.  It is set up in the core's own menu
+(Analogizer, Analogizer Video, SNAC Adapter, SNAC Assignment, and H and V
+Position to centre the picture on the CRT); with "Analogizer" off, the
+default, the core is unchanged.  A SNAC pad plays as the Pocket does: the
+d-pad moves, the four face buttons fire up, down, left and right.  Because
+the core declares a cartridge adapter, the Pocket powers the slot: take any
+game cartridge out first.  `docs/analogizer.md` has the modes, the
+controller assignments, and what has and has not been checked (the path is
+proven in simulation; no Analogizer has been tried with this core yet).
+
 ## Building the ROM image
 
 ```sh
@@ -157,6 +172,7 @@ sim/run_cpu.sh              # the CPU against them; -live <seconds> streams from
 sim/run_machine.sh 2000 100 # the main board from reset, frames to artifacts/machine/
 sim/run_sound.sh            # the sound board against MAME's recording, band by band
 sim/run_pocket.sh 2000 100  # the whole core on the real memory glue, from the download
+sim/run_analogizer.sh       # the Analogizer path, read at the cartridge pins
 
 tools/shadow_romset.sh      # once: the romset under the names MAME 0.288 wants
 REGION_DIR=/tmp/r tools/mame.sh -seconds_to_run 2 \
@@ -175,6 +191,14 @@ tools/diff_bus.py --selftest /tmp/b/trace_bus.bin
 ## Credits
 
 MAME, for the driver and devices this was written against (`ref/mame/`). The
-vendored cores and their authors (`modules/VENDOR.md`). The
+vendored cores and their authors (`modules/VENDOR.md`). **RndMnkIII**, for
+the [Analogizer](https://github.com/RndMnkIII/Analogizer) adapter and its
+`openFPGA_Pocket_Analogizer` module (`target/pocket/analogizer/`), with the
+parts it gathers from others: the Y/C encoder by **Mike Simone**
+(MiSTerFPGA_YC_Encoder), the scandoubler and HQ2x by **Sorgelig** and
+**Ludvig Strigeus** (MiSTer), the PlayStation controller interface after
+**pgate1**'s psPAD, and the SNAC game-controller readers he credits to
+**@MikeSimonson**, the **MiST** project, **@RandyS**, **jotego**, **Scott
+Larson** (the PS/2 receiver) and **@tomasz**. The
 openFPGA/opengateware framework in `platform/pocket/`. Anyone whose board
 photographs, schematics or measurements are in `docs/hardware.md`.

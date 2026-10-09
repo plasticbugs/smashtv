@@ -25,3 +25,9 @@ The first boot says FAILURE IN CMOS
 RAM and restores its defaults. That is
 the game finding a blank memory, as a
 cabinet with a flat battery would.
+
+Analogizer: CRT video and SNAC pads,
+set in this core's menu (Analogizer:
+On; H and V Position centre the
+picture). The slot is powered: remove
+any cartridge first.

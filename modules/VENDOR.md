@@ -9,6 +9,17 @@ self-contained and reproducible. Each keeps its own LICENSE alongside.
 |---|---|---|---|
 | cpu-mc6809 | https://github.com/cavnex/mc6809 (Greg Miller's cycle-accurate MC6809/E) | the Xenophobe core, at its commit ce86a8d | BSD-style, `LICENSE.md` |
 | sound-jt51 | https://github.com/jotego/jt51 `hdl/` | the Cadash core (which has it from Xenophobe) | GPL-3.0 |
+| `target/pocket/analogizer/` | RndMnkIII's Analogizer adapter module (`openFPGA_Pocket_Analogizer` 1.4) and the 14 files it instantiates, verbatim: https://github.com/RndMnkIII/MiraxPocket `src/fpga/analogizer/` at 9dfdd2b9bec79fe5ea10e154a0613a0c9d4fe37f; `analogizer.qip` is ours | the pocket-core-template (d9503cc) | GPL-3.0-or-later (the host core's); `hq2x.sv`, `scandoubler_2.v`, `yc_out_legacy.sv` carry their own GPL headers |
+
+The Analogizer module lives under `target/pocket/` rather than `modules/`
+because it is the Pocket's cartridge port, not the machine, and so that
+`tools/gen_qip.sh` and the per-module lint do not sweep it in: `core.qip`
+includes its own `analogizer.qip`, and `sim/lint.sh` lints it behind
+`target/pocket/pocket_analogizer.sv` with a stand-in for its one VHDL file
+(`sim/ps2_keyboard_stub.v`).  Left out: `scandoubler.v`, `scanlines.v`,
+`yc_out.sv`, `psPAD_top.v`, `psx_control.v`, `csync.v`, `sync_fix.v` (also
+defined inside the top file), `two_button_press_detector.v`, `uart_tx.v`
+and `sine_lut.mem` -- nothing instantiates them.
 
 For each module record: what it is, the upstream repository and commit, which
 sibling it came through, its licence, and anything it needs that is not

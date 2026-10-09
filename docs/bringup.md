@@ -89,6 +89,35 @@ chip, and main RAM and the CMOS are landing on top of each other.
 | menu restarts the game | `pause` has reached a reset; METHODOLOGY section 5.5 |
 | picture goes to background colour while the menu is open | the autoerase is not being held by `pause` |
 
+## With an Analogizer
+
+Not yet run on hardware with this core (docs/analogizer.md says what the
+bench proved; the same wrapper has had one run in Moo Mesa).  In this
+order -- each step's reading tells the next one where to look:
+
+1. **Menu "Analogizer: Off"** (the default).  The core must play exactly as
+   without the adapter, Pocket screen and controls.  This build also moved
+   a few short shift registers out of block RAM to make room for it
+   (docs/analogizer.md, *Block RAM*), so a fault here with the Analogizer
+   off is that, not the adapter.  If it does not play as before, stop there.
+2. **Menu: Analogizer On, Video RGBS, SNAC Adapter None.**  Expected: the
+   same picture on the Pocket and on the CRT, 15.81 kHz / 54.71 Hz (a PVM's
+   info screen shows it; some consumer sets will not hold 54.7 Hz).  The
+   bring-up panel shows on the CRT too.  No picture at all: say whether the
+   CRT reports a signal (sync but no colour points at the DAC clock; nothing
+   at all points at sync).
+3. **Each other video mode in turn** (RGsB and YPbPr need the SOG switch on).
+4. **SNAC**: one pad, assignment "SNAC P1 -> P1": the d-pad moves, the face
+   buttons fire; the Pocket's own controls are then player 2.
+5. **The menu's memory**: change Video, quit the core and load it again.
+   The setting, and Analogizer On, should still be there.  Then change one
+   entry and check the others did not move.
+6. **Position**: "Analogizer V Position" + should move the picture down by
+   that many lines, + on "H Position" to the right (only 5 dots: the board
+   leaves little blanking there), and both should be kept across a reload.
+   Try a negative value early: that the firmware writes a signed slider as
+   the core reads it is not proven.
+
 ## Log
 
 - 2026-09-20, build `7de5b402...`: **game audio, game starts and plays, picture
@@ -129,6 +158,12 @@ chip, and main RAM and the CMOS are landing on top of each other.
   start.  The test now puts back both words (`sram_selftest.sv`; `sim/run_mem.sh`
   checks the patterns read back AND that BEEF/0022 are left as found).  Not yet
   on hardware.
+
+- 2026-10-08, bitstream be9d819d0c599d6a3cc7712fe2559dba (Analogizer, branch
+  `analogizer`): not yet run.  With "Analogizer: Off" it should play exactly
+  as 0.1.0 did; the first reading is that, then the menu's six new entries
+  under the game's own.  This build also moved short shift registers out of
+  block RAM to make room (docs/analogizer.md, *Block RAM*).
 
 Date, build md5, what was seen, what it ruled out. One line each. The theories
 that died belong here as much as the one that lived.
