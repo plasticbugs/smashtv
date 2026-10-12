@@ -1,3 +1,42 @@
+# 0.2.0
+
+**Analogizer support.** Smash T.V. now works with RndMnkIII's
+[Analogizer](https://github.com/RndMnkIII/Analogizer) adapter: the board's
+own picture on a CRT, and native controllers through SNAC. Confirmed on a
+Pocket with an Analogizer and a CRT.
+
+### What's new
+
+- **Video out of the adapter's VGA port**: RGBS, RGsB, YPbPr, Y/C (NTSC or
+  PAL), or scandoubled for a VGA monitor. The board's own signal: 15.81 kHz,
+  54.71 Hz.
+- **Set up from the core's menu**: **Analogizer** (Off, On, or "On, Pocket
+  off"), **Analogizer Video**, **SNAC Adapter**, **SNAC Assignment**.
+- **H / V Position** centre the picture (16 pixels left to 5 right, 16
+  lines up to 13 down).
+- **SNAC controllers** for both players play as the Pocket does: the d-pad
+  moves, X/B/Y/A fire up/down/left/right (the SNES layout too).
+- A few small sound and controller buffers moved from block RAM into logic
+  to make room for the adapter; play is unchanged.
+
+### Before you install
+
+**With this core the Pocket powers the cartridge slot.** Take any game
+cartridge out first. Set the adapter up as its
+[How to use it](https://github.com/RndMnkIII/Analogizer/wiki/How-to-use-it%3F)
+page says (SNAC switch on A, 5 V into its USB-C port, the audio cable into
+the Pocket's headphone socket). Settings are in the core's own menu; no
+`analogizer.bin` file is needed, and with "Analogizer" off (the default)
+the core plays as before.
+
+### Installing
+
+Unzip onto the SD card root, overwriting previous files. ROMs are not
+included: build them with the included `mra_build.py` from your own MAME
+romset, as the README describes.
+
+---
+
 ## Smash T.V. for Analogue Pocket 0.1.0
 
 The first release. Williams' Smash T.V. (1990, Midway Y-unit): the TMS34010

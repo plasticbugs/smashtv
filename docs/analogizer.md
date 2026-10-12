@@ -84,9 +84,7 @@ the left one), so fire with the face buttons.
 so the Pocket powers the slot whether or not an Analogizer is in it. Do not
 leave a game cartridge in the slot while this core runs.
 
-**Not yet run on hardware with this core.** The same wrapper and module
-have had one run in Moo Mesa (2026-10-08: the menu, and the picture on a
-CRT, right). What has been checked here is listed under *What was
+**Confirmed on a Pocket with an Analogizer and a CRT** (0.2.0). What has been checked here is listed under *What was
 measured* below. Send problems with the adapter itself to the
 Analogizer project.
 
